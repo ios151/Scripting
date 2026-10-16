@@ -73,6 +73,7 @@ import { CellularGuide, type GuideStage } from "./pages/CellularGuide";
 import { MessageSheet, type MessageAction, type MessageTone } from "./pages/MessageSheet";
 import { applyJitter, fromDeviceCoordinate, parseAndConvert, toDeviceCoordinate } from "./utils/coords";
 import { openAppSettings } from "./utils/appSettings";
+import { releaseKeepAlive, retainKeepAlive } from "./utils/keepalive";
 import { loadPairing, type PairingRecord } from "./core/pairing";
 import { debugLog, describeError } from "./core/debug";
 import { restoreRealLocation, startLocationSession, type LocationSessionHandle } from "./core/session";
@@ -919,13 +920,6 @@ export function App({ shared }: AppProps = {}) {
   }
 
   /**
-   * 申请后台保活。
-   *
-   * `keepAlive()` 返回的是 **boolean**：系统拒绝时 resolve(false) 而不是 reject。
-   * 之前只接了 reject 分支，被拒也当成成功，于是锁屏掉线时界面上毫无线索。
-   * 文档：Scripting Documentation / background_keeper。
-   */
-  /**
    * 保活为什么没成。
    *
    * 后台保活靠的是**共享音频引擎**（dts 原文：App-wide audio state、
@@ -947,58 +941,57 @@ export function App({ shared }: AppProps = {}) {
     return "多半是音频被其他 App 占着";
   }
 
-  /** 首页 Tab 下「锁屏会掉线」只提醒一次，别每次进后台都弹。 */
-  const homeTabKeepAliveWarned = useRef(false);
+  /** 保活没起来只提醒一次，别每次进后台都弹。开新会话时重置。 */
+  const keepAliveWarned = useRef(false);
 
+  /** 同一轮会话里只提醒一次。 */
+  function warnKeepAlive(message: string): void {
+    if (keepAliveWarned.current) return;
+    keepAliveWarned.current = true;
+    fireToast(message);
+  }
+
+  /**
+   * 申请后台保活。
+   *
+   * **别按 `Script.env` 预判能不能用。** 文档和 dts 都写着「仅 index 可用」，
+   * 2.7.1 据此把首页 Tab 拦掉了——而 Tab 跑在主 App 里，保活本来好好的。
+   * 拦掉的后果是蜂窝下切去任何一个 App 几分钟就必掉线（POSIX 57），
+   * 这个入口等于废了。能不能用问 `keepAlive()` 自己，别替它回答。
+   */
   async function acquireKeepAlive(): Promise<void> {
-    /*
-      首页 Tab 里根本没有后台保活这回事。
-
-      文档写明 BackgroundKeeper「仅当脚本在主应用中运行（即 Script.env === "index"）
-      时可用」——Tab 环境下调它必然返回 false。那不是「系统拒绝」，更不是音频被
-      占着，是这个入口不支持。照旧提示会把人引到完全错误的方向（去关音乐、
-      查通话），实际上怎么关都没用。
-
-      代价得说清楚：Tab 的实例虽然常驻（切 Tab 不停），但**锁屏仍然会被挂起**，
-      没有保活就会掉线。所以提醒一次，不反复刷。
-    */
-    if (false as boolean) {
-      debugLog("keepalive", `${Script.env} 环境不支持后台保活（仅 index 可用），跳过`);
-      if (!homeTabKeepAliveWarned.current) {
-        homeTabKeepAliveWarned.current = true;
-        // 分享进来的那条路也一样，不是首页 Tab 独有。
-        fireToast(
-          IS_HOME_TAB
-            ? "首页标签页不支持后台保活，锁屏会掉线；从脚本列表打开则不受影响"
-            : "这个入口不支持后台保活，锁屏会掉线；从脚本列表打开则不受影响",
-        );
-      }
-      return;
-    }
-
     try {
-      const started = await BackgroundKeeper.keepAlive();
-      debugLog("keepalive", `keepAlive() 返回 ${started}`);
+      const started = await retainKeepAlive("session");
       if (!started) {
-        fireToast(`后台保活没起来：${await keepAliveFailureHint()}`);
+        warnKeepAlive(`后台保活没起来：${await keepAliveFailureHint()}`);
         return;
       }
       // 以应用自己报的状态为准，不是以我们调过为准。
       const active = await BackgroundKeeper.isActive;
       debugLog("keepalive", `isActive=${active}`);
-      if (!active) fireToast("后台保活未生效，锁屏后可能掉线");
+      if (!active) warnKeepAlive("后台保活未生效，锁屏后可能掉线");
     } catch (error) {
-      debugLog("keepalive", "申请后台保活出错", describeError(error));
-      fireToast("后台保活未生效，锁屏后可能掉线");
+      // dts：access errors reject。分享表单那类非主 App 的入口会走到这儿。
+      debugLog("keepalive", `申请后台保活出错（env=${Script.env}）`, describeError(error));
+      warnKeepAlive("这个入口拿不到后台保活，锁屏会掉线；从脚本列表打开则不受影响");
     }
   }
 
   /**
-   * 会话期间跟着前后台切换维持保活。
+   * 会话期间维持保活。
    *
-   * 文档建议的用法就是进后台时 keepAlive、回前台时 stopKeepAlive——
-   * 保活队列是引用计数的，重复调用安全。只在会话进行中才续，
-   * 空闲时让它停掉，免得白耗电。
+   * **回前台不撤保活。** 保活在会话建立时就申请好（见 connectSession），
+   * 整个模拟期间一直持有，直到会话收尾才松手。
+   *
+   * 以前是「进后台申请、回前台撤掉」，照着文档「回到前台时停止保活」写的。
+   * 但 dts 讲得更准：`Request keepAlive() while foregrounded, before starting
+   * background work.`——要在**前台就绪**，而不是等进了后台再申请。按下电源键
+   * 锁屏那一下，音频引擎根本来不及从 background 事件里预热起来，App 几秒内就被
+   * 挂起，连接跟着断。文档那句针对的是「回到前台工作就结束了」的脚本，
+   * 而这里的会话跨着前后台一直在跑。
+   *
+   * 这里只留一手兜底：进后台时再 retain 一次。保活靠共享音频引擎，中途被电话
+   * 之类打断后 retain 能把它接回来，而且重复调用是幂等的。
    */
   useEffect(() => {
     const listener = (phase: ScenePhase) => {
@@ -1007,7 +1000,6 @@ export function App({ shared }: AppProps = {}) {
       if (phase !== "inactive") debugLog("keepalive", `scenePhase=${phase}`);
       if (session.value === null) return;
       if (phase === "background") void acquireKeepAlive();
-      // else if (phase === "active") void BackgroundKeeper.stopKeepAlive().catch(() => undefined);
     };
     AppEvents.scenePhase.addListener(listener);
     return () => AppEvents.scenePhase.removeListener(listener);
@@ -1177,7 +1169,7 @@ export function App({ shared }: AppProps = {}) {
       走到这儿才是真的放弃：要么不重连，要么五轮都失败了。
       保活到这一刻才撤——上面那段重连需要它撑着（见函数开头）。
     */
-    void BackgroundKeeper.stopKeepAlive().catch(() => undefined);
+    void releaseKeepAlive("session");
     // 重连全败时移动也停掉，否则界面一直停在「移动中」，而底下根本没有会话。
     stopMovement();
     setSessionState("idle");
@@ -1617,6 +1609,8 @@ export function App({ shared }: AppProps = {}) {
       startedAt: now,
       updatedAt: now,
     });
+    // 新一轮会话，保活的提醒重新计数。
+    keepAliveWarned.current = false;
     void acquireKeepAlive();
     sessionStartedAt.current = Date.now();
     void startLiveActivity(start);
@@ -2173,7 +2167,6 @@ export function App({ shared }: AppProps = {}) {
     movementTimer.setValue(timer);
   }
 
-  /** @returns 失败原因；成功为 null */
   /**
    * 停止模拟。
    *
@@ -2182,6 +2175,22 @@ export function App({ shared }: AppProps = {}) {
    * @returns 失败原因；成功为 null
    */
   async function handleStopSession(silent = false): Promise<string | null> {
+    try {
+      return await stopSession(silent);
+    } finally {
+      /*
+        保活留到真正收完才松手。
+
+        停止失败时下面还要重连补发一次，慢的时候好几秒。这会儿要是保活已经撤了，
+        用户正好锁屏，补发就连同整个 App 一起被挂起——停止指令永远送不到，
+        而设备那头还停在假位置。
+      */
+      void releaseKeepAlive("session");
+    }
+  }
+
+  /** `handleStopSession` 的正文；拆出来只为把保活的释放统一收进上面的 finally。 */
+  async function stopSession(silent: boolean): Promise<string | null> {
     stopMovement();
     const handle = session.value;
     session.setValue(null);
@@ -2189,7 +2198,6 @@ export function App({ shared }: AppProps = {}) {
     setStatusMsg("");
     activeLoc.setValue(null);
     saveActiveCache(null);
-    void BackgroundKeeper.stopKeepAlive().catch(() => undefined);
     if (handle) {
       try {
         await handle.stop();

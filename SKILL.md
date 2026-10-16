@@ -81,6 +81,8 @@ Buffer 来自共享内存池，数据在队列里排队期间底层就可能被�
 当成成功，锁屏掉线时界面上一点线索都没有。要检查返回值，再复核
 `BackgroundKeeper.isActive`。
 
+保活什么时候申请、什么时候撤、谁来撤，见 **2.26**——那三条比这条重要得多。
+
 ### 2.3 `List` 的一行里放多个 `Button`，只有最后一个会响应
 
 SwiftUI 把列表行当成一个点击目标。做一排颜色圆点时栽过——点哪里都只选中最后
@@ -425,6 +427,49 @@ LocalDevVPN settings or the active configuration changed. Read again before savi
 别据此告诉用户「功能没问题」——这个判断错过一次：诊断页显示红叉的那一项，
 恰恰就是启动失败的同一个错误。
 
+### 2.26 后台保活的三条铁律
+
+保活是这个脚本的命根子：没有它，切去任意一个 App 几分钟，Scripting 就被系统
+挂起，隧道断、定位弹回真实位置，而界面上什么都不会报。**下面三条是真机上用
+掉线换来的，改保活之前先读完。**
+
+#### 别按 `Script.env` 预判能不能保活
+
+文档和 dts 都写着「仅当 `Script.env === "index"` 时可用」。照着写了个
+
+```ts
+if (Script.env !== "index") return;   // ← 2.7.1 的错
+```
+
+结果把首页 Tab 这个入口整个废掉了——Tab 跑在主 App 里，保活本来一直好好的。
+用户的实际反馈是「随便打开个天气就断，几分钟必断，蜂窝压根没法用」。
+
+能不能用**问 API 自己**：`keepAlive()` 被系统拒绝时 resolve(false)，环境不允许
+时 reject（dts：`Audio failure resolves to false; access errors reject`）。
+按环境名预判等于替它回答，而它的答案和文档不一致。
+
+#### 在前台就申请好，回前台**不要**撤
+
+dts 的原话是 `Request keepAlive() while foregrounded, before starting
+background work.` —— 关键在 **while foregrounded**。
+
+早先是「进后台时 keepAlive、回前台时 stopKeepAlive」，照文档「回到前台时停止
+保活」写的。但按下电源键锁屏那一瞬，音频引擎来不及从 `background` 事件里预热，
+App 几秒内就被挂起。文档那句针对的是「回到前台工作就结束」的脚本，而这里的会话
+跨着前后台一直在跑：**建会话时（前台）就申请，一直持有到会话收尾**。
+
+#### 引用计数按脚本算，不按调用算
+
+dts：`stopKeepAlive() releases that script's request.` 同一个脚本里不管哪段代码
+调 `stopKeepAlive()`，整份请求都没了。本脚本有两处要保活（模拟会话、配对输 PIN），
+各调各的就会出现「模拟进行中去重新配对，配完一松手，模拟的保活被一起撤掉」——
+而系统更新后边模拟边重新配对恰恰是常见操作。
+
+所以统一走 `utils/keepalive.ts` 的 `retainKeepAlive(owner)` /
+`releaseKeepAlive(owner)`，自己记一份持有者，最后一个松手才真的停。
+**不要再直接调 `BackgroundKeeper.stopKeepAlive()`。**
+这条不变量有自测守着：`_selftest/wloc-keepalive.test.ts`。
+
 ---
 
 ## 3. 开发流程
@@ -433,12 +478,14 @@ LocalDevVPN settings or the active configuration changed. Read again before savi
 # 类型检查（dts 从 Scripting 的工作区复制到仓库根）
 npx -y -p typescript@5.6 tsc --noEmit -p tsconfig.json
 
-# 自测，脱机可跑，不需要设备（217 项）
+# 自测，脱机可跑，不需要设备（247 项）
 npx -y tsx _selftest/wloc-engine.test.ts      # 字节序、plist、归档、握手原语、配对记录导出
 npx -y tsx _selftest/wloc-movement.test.ts    # 球面几何、路径推进、往返、摇杆、GPX
 npx -y tsx _selftest/wloc-pairverify.test.ts  # pair-verify 四步与密钥派生
 npx -y tsx _selftest/wloc-rsd.test.ts         # HTTP/2 帧、RemoteXPC、服务发现
 npx -y tsx _selftest/wloc-redact.test.ts      # 日志脱敏：该打码的打掉、该留的留住
+npx -y tsx _selftest/wloc-coords.test.ts      # 链接解析、坐标系判定与换算、值域校验
+npx -y tsx _selftest/wloc-keepalive.test.ts   # 保活持有者记账（见 2.26）
 
 # 打包发布产物
 python build-release.py

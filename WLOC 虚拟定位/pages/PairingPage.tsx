@@ -44,6 +44,7 @@ import { createHostIdentity, createPIN, pairThisDevice } from "../core/pair_setu
 import { SimulationLiveActivity, type SimulationState } from "../live_activity";
 import { verifyPairingRecord } from "../core/session";
 import { endpointFromSettings, loadSettings } from "../utils/storage";
+import { releaseKeepAlive, retainKeepAlive } from "../utils/keepalive";
 
 export function PairingPage() {
   const dismiss = Navigation.useDismiss();
@@ -142,7 +143,10 @@ export function PairingPage() {
       }
 
       try {
-        await BackgroundKeeper.keepAlive();
+        // 走 retain/release 而不是直接调 BackgroundKeeper：保活的引用计数是按
+        // 脚本算的，直接 stopKeepAlive 会把同一脚本里**模拟会话**的那份也撤掉
+        // ——而配对常常就发生在模拟进行中（系统更新后重新配对）。
+        await retainKeepAlive("pairing");
         lease = true;
       } catch {
         // 没有后台保活也能试，只是切走后更容易被系统回收。
@@ -166,7 +170,7 @@ export function PairingPage() {
       setStatus(`配对失败：${error instanceof Error ? error.message : String(error)}`);
       setIsError(true);
     } finally {
-      if (lease) await BackgroundKeeper.stopKeepAlive().catch(() => undefined);
+      if (lease) await releaseKeepAlive("pairing").catch(() => undefined);
       // 配对结束就收掉卡片——PIN 已经没用了，留着是信息泄露也是干扰。
       await pinActivity.value
         .end(pairingCardState(""), { dismissTimeInterval: 0 })
