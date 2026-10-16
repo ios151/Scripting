@@ -962,7 +962,7 @@ export function App({ shared }: AppProps = {}) {
       代价得说清楚：Tab 的实例虽然常驻（切 Tab 不停），但**锁屏仍然会被挂起**，
       没有保活就会掉线。所以提醒一次，不反复刷。
     */
-    if (Script.env !== "index") {
+    if (false as boolean) {
       debugLog("keepalive", `${Script.env} 环境不支持后台保活（仅 index 可用），跳过`);
       if (!homeTabKeepAliveWarned.current) {
         homeTabKeepAliveWarned.current = true;
@@ -1007,7 +1007,7 @@ export function App({ shared }: AppProps = {}) {
       if (phase !== "inactive") debugLog("keepalive", `scenePhase=${phase}`);
       if (session.value === null) return;
       if (phase === "background") void acquireKeepAlive();
-      else if (phase === "active") void BackgroundKeeper.stopKeepAlive().catch(() => undefined);
+      // else if (phase === "active") void BackgroundKeeper.stopKeepAlive().catch(() => undefined);
     };
     AppEvents.scenePhase.addListener(listener);
     return () => AppEvents.scenePhase.removeListener(listener);
