@@ -15,6 +15,7 @@ import {
   HStack,
   Spacer,
   Text,
+  Image,
   Button,
   TextField,
   List,
@@ -56,6 +57,13 @@ export function PairingPage() {
   const [pin, setPin] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
   const [pairingInProgress, setPairingInProgress] = useState(false);
+  /**
+   * 保活没拿到时的提醒，挂在 PIN 卡片里。
+   *
+   * 不走 `status`：那一行在配对过程中被 `pairThisDevice` 的进度一路覆盖，
+   * 而这句要在用户切去「设置」输码的整段时间里一直看得见。
+   */
+  const [keepAliveWarn, setKeepAliveWarn] = useState("");
   /** 「配对这台设备」的操作说明浮层。 */
   const [showIntro, setShowIntro] = useState(false);
   /** 显示 PIN 的卡片。和定位模拟共用同一个注册，靠 kind 区分。 */
@@ -116,6 +124,7 @@ export function PairingPage() {
     setShowIntro(false);
     setPairingInProgress(true);
     setIsError(false);
+    setKeepAliveWarn("");
     let lease = false;
     try {
       const host = await createHostIdentity();
@@ -146,10 +155,28 @@ export function PairingPage() {
         // 走 retain/release 而不是直接调 BackgroundKeeper：保活的引用计数是按
         // 脚本算的，直接 stopKeepAlive 会把同一脚本里**模拟会话**的那份也撤掉
         // ——而配对常常就发生在模拟进行中（系统更新后重新配对）。
-        await retainKeepAlive("pairing");
+        const started = await retainKeepAlive("pairing");
         lease = true;
-      } catch {
-        // 没有后台保活也能试，只是切走后更容易被系统回收。
+        /*
+          两样都看，照文档来：`keepAlive()` 的返回值说的是「这次申请被接受了吗」，
+          `isActive` 说的是「音频引擎此刻真在跑吗」——申请成功之后仍可能因为别的
+          App 占着音频而没真正激活。
+
+          这里值得提示而不是闷着：配对要切到「设置」里输 PIN，本页在后台等最多
+          三分钟，保活没起来就可能被系统回收。那时用户看到的是「广播超时」，
+          照着这句去查永远查不到真因。
+        */
+        if (!started) {
+          setKeepAliveWarn(
+            "后台保活没起来，切到「设置」时本页可能被回收。多半是音频被其他 App 占着（在放歌或通话？），停掉再试。",
+          );
+        } else if (!(await BackgroundKeeper.isActive)) {
+          setKeepAliveWarn("后台保活未生效，切到「设置」时本页可能被回收。配不上就回来重试一次。");
+        }
+      } catch (error) {
+        // 环境不允许时 keepAlive() 是 reject 不是返回 false（dts：access errors reject）。
+        debugLog("pairing", "申请后台保活出错", describeError(error));
+        setKeepAliveWarn("这个入口拿不到后台保活，切到「设置」时本页可能被回收。从脚本列表打开本脚本再配对更稳。");
       }
 
       const record = await pairThisDevice(host, code, setStatus);
@@ -367,6 +394,21 @@ export function PairingPage() {
                   ④ 回到本页等「✓ 配对完成」
                 </Text>
               </VStack>
+
+              {/* 保活没拿到时才出现。配对要切去「设置」，本页在后台等三分钟，
+                  被回收的话报出来的是「广播超时」，看不出真因。 */}
+              {keepAliveWarn ? (
+                <HStack alignment="top" spacing={6}>
+                  <Image
+                    systemName="exclamationmark.triangle.fill"
+                    foregroundStyle="systemOrange"
+                    font="caption2"
+                  />
+                  <Text font="caption2" foregroundStyle="systemOrange">
+                    {keepAliveWarn}
+                  </Text>
+                </HStack>
+              ) : null}
 
               <Button
                 title="复制 PIN"

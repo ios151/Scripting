@@ -28,10 +28,13 @@ function check(name: string, ok: boolean, detail?: string) {
 /** 记下 keepAlive / stopKeepAlive 各被调了几次。 */
 const calls = { keepAlive: 0, stop: 0 };
 let keepAliveResult = true;
+/** 置 true 时 keepAlive() 抛错，模拟 dts 说的 access errors reject。 */
+let keepAliveThrows = false;
 
 (globalThis as unknown as { BackgroundKeeper: unknown }).BackgroundKeeper = {
   async keepAlive() {
     calls.keepAlive += 1;
+    if (keepAliveThrows) throw new Error("access denied");
     return keepAliveResult;
   },
   async stopKeepAlive() {
@@ -78,6 +81,31 @@ async function main() {
     await releaseKeepAlive("session");
     check("被拒后仍然登记，松手时照常收尾", calls.stop === 1, `stopKeepAlive 调了 ${calls.stop} 次`);
     keepAliveResult = true;
+  }
+
+  console.log("\n[抛错不能留下幽灵持有者]");
+  {
+    // 登记要是放在 await 之前，这里的 owner 就永远留在集合里了：调用方接住异常、
+    // 认为自己没拿到租约、也就不会 release，于是别人松手时 size > 0 永远成立，
+    // 音频引擎再也停不下来。
+    await retainKeepAlive("session");
+    keepAliveThrows = true;
+    let threw = false;
+    try {
+      await retainKeepAlive("pairing");
+    } catch {
+      threw = true;
+    }
+    keepAliveThrows = false;
+    check("环境不允许时如实抛出", threw);
+
+    calls.stop = 0;
+    await releaseKeepAlive("session");
+    check(
+      "抛错的 owner 没被登记，会话松手就能真的停",
+      calls.stop === 1,
+      `stopKeepAlive 调了 ${calls.stop} 次`,
+    );
   }
 
   console.log(`\n通过 ${passed} 项，失败 ${failed} 项`);

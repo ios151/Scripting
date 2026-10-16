@@ -32,8 +32,18 @@ const owners = new Set<KeepAliveOwner>();
  * @throws 环境不允许时 `keepAlive()` 自己会抛，交给调用方处理
  */
 export async function retainKeepAlive(owner: KeepAliveOwner): Promise<boolean> {
-  owners.add(owner);
+  /*
+    登记放在 await **之后**。
+
+    放前面的话，`keepAlive()` 抛出时这个 owner 就永远留在集合里了——调用方
+    接住异常、认为自己没拿到租约、也就不会去 release，于是其他持有者松手时
+    `owners.size > 0` 永远成立，音频引擎再也停不下来，白耗电到脚本退出。
+
+    抛出时也不删已有的登记：会话中途重申请失败（比如来电打断）不该把它
+    原本持有的那份一笔勾销。
+  */
   const started = await BackgroundKeeper.keepAlive();
+  owners.add(owner);
   debugLog("keepalive", `keepAlive() 返回 ${started}（持有者：${[...owners].join("+")}）`);
   return started;
 }
