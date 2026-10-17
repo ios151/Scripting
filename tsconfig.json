@@ -25,7 +25,8 @@
   },
   "include": [
     "./dts/*.d.ts",
-    "WLOC 虚拟定位"
+    "WLOC 虚拟定位",
+    "设备工具箱"
   ],
   "exclude": [
     "./dts/scripting.d.ts"

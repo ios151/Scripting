@@ -20,6 +20,7 @@ DIST = os.path.join(HERE, "dist")
 # 脚本目录名 → zip 文件名（不含扩展名）
 ALIASES = {
     "WLOC 虚拟定位": "WLOC",
+    "设备工具箱": "DeviceToolbox",
 }
 
 SKIP = {"dist", "node_modules", "__pycache__"}
