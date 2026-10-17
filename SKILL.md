@@ -9,14 +9,20 @@
 
 | 要求 | 为什么 |
 |---|---|
-| **iOS 17+** | `Map` 组件本身是 iOS 17+；RemotePairing / RSD 这套开发者通道也是 iOS 17 起 |
-| **iOS 18+**（部分功能） | 点中 POI 弹系统详情卡（`featureSelectionAccessory`）、`Annotation` 的标记选中。低版本上这两项静默失效，不影响主流程 |
-| **iOS 26+**（外观） | 界面用了 `glassEffect`（Liquid Glass）。低版本上退化成普通背景，功能不受影响 |
+| **Scripting 3.3.0 (28)+** | 2.7.1 起用了 `ScriptSession`、`BackgroundKeeper.getState`、`Device.getNetworkState`、`Device.appVersion`、`cancelRSDTunnelOpening`，都是 3.3.0 才有的。**目前只在 TestFlight**，App Store 上架的是 3.2.1 |
+| **iOS 27+** | 跟着上面那条走——3.3.0 要求 iOS 27 |
 | **开发者模式必须开** | 设置 → 隐私与安全性 → 开发者模式。整条链路都走开发者通道 |
 | **灵动岛**（可选） | 需要带灵动岛的机型（iPhone 14 Pro 及以后）。没有的话实时活动仍会出现在锁屏和通知中心 |
 
 `script.json` 里没有写最低版本——Scripting 应用自己有下限，脚本不另外设。
-真正的硬门槛是 iOS 17 和开发者模式，其余都是「有更好、没有也能用」。
+
+**协议层本身的门槛低得多**，别把这两件事混起来：`Map` 组件和 RemotePairing / RSD
+这套开发者通道都是 iOS 17 起；`featureSelectionAccessory`（点中 POI 弹系统详情卡）
+要 iOS 18；`glassEffect` 要 iOS 26，低版本退化成普通背景。**2.7.1 之前的版本在
+iOS 17+ 上都能跑**，上面那个 27 的门槛完全是 3.3.0 带来的。
+
+所以给低版本用户的答复是**装 2.6.2**（最后一个不碰那五个接口的版本），
+而不是「不支持」。链接在 `docs/WLOC.md`。
 
 ---
 

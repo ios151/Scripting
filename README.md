@@ -10,14 +10,23 @@
 
 | 脚本 | 做什么 | 当前版本 | 要求 | 安装 |
 |---|---|---|---|---|
-| **[WLOC 虚拟定位](docs/WLOC.md)** | 用苹果官方开发者接口模拟本机定位，与 Xcode 的 Simulate Location 同一套机制 | 2.7.5 | iOS 17+ · 开发者模式 | [⬇️ 一键安装](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FWLOC.zip%22%5D) |
+| **[WLOC 虚拟定位](docs/WLOC.md)** | 用苹果官方开发者接口模拟本机定位，与 Xcode 的 Simulate Location 同一套机制 | 2.7.5 | iOS 27+ · Scripting 3.3.0+ · 开发者模式 | [⬇️ 一键安装](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FWLOC.zip%22%5D) |
 
 每个脚本的详细说明、已知限制、更新记录点进「脚本」那一列。
 历史版本和更新日志在 [Releases](https://github.com/ios151/Scripting/releases)。
 
-> **Scripting 应用本身也要够新。** 这些脚本用到的一些接口（`ScriptSession`、
-> `BackgroundKeeper.getState`、`Device.appVersion` 等）是较近的版本才加的，
-> 旧版上会静默失效。装完如果行为不对，先去 App Store 更新 Scripting。
+> ### ⚠️ Scripting 3.3.0 目前只在 TestFlight
+>
+> App Store 上架的还是 3.2.1。WLOC **2.7.1 起**用到了 `ScriptSession`、
+> `BackgroundKeeper.getState`、`Device.getNetworkState`、`Device.appVersion`、
+> `cancelRSDTunnelOpening` 这几个 3.3.0 才有的接口，在 3.2.1 上会静默失效。
+>
+> **还在用 App Store 版（3.2.1）、或者系统低于 iOS 27 的**，装最后一个不依赖这些
+> 接口的版本：
+> **[⬇️ 一键安装 WLOC 2.6.2](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fgithub.com%2Fios151%2FScripting%2Freleases%2Fdownload%2Fv2.6.2%2FWLOC.zip%22%5D)**
+>
+> 装了 2.6.2 之后**别去「远程资源」点检查更新** —— 那个地址永远指向最新版，
+> 一点就被拉到 2.7.x 去了。
 
 ---
 

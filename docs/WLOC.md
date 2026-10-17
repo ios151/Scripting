@@ -51,13 +51,29 @@
 
 ## 要求
 
-- **iOS 17+**，并开启开发者模式（设置 → 隐私与安全性 → 开发者模式）
-- **较新的 Scripting 应用**。用到的 `ScriptSession`、`BackgroundKeeper.getState`、
-  `Device.appVersion` 等接口是较近的版本才加的，旧版上会静默失效。
-  当前装的是哪个版本，在脚本的「连接状态」页最下面能看到
-- iOS 18+ 才有「点中地点弹系统详情卡」；iOS 26+ 才有毛玻璃外观。
-  两者缺失都只影响观感，不影响功能
+- **iOS 27+**
+- **Scripting 3.3.0 (28) 或更高**，目前只在 **TestFlight**（App Store 上架的是 3.2.1）
+- **开发者模式必须开**：设置 → 隐私与安全性 → 开发者模式
 - 灵动岛需要 iPhone 14 Pro 及以后的机型；没有的话实时活动仍会出现在锁屏和通知中心
+
+当前装的是哪个 Scripting 版本，在脚本的「连接状态」页最下面能看到。
+
+### 用不了 3.3.0 的，装 2.6.2
+
+**[⬇️ 一键安装 WLOC 2.6.2](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fgithub.com%2Fios151%2FScripting%2Freleases%2Fdownload%2Fv2.6.2%2FWLOC.zip%22%5D)**
+
+2.7.1 起用到了这五个 3.3.0 才有的接口，在 3.2.1 上会静默失效：
+
+| 接口 | 失效了会怎样 |
+|---|---|
+| `ScriptSession` | 锁屏卡片的「恢复真实位置」没法交给主脚本收尾 |
+| `BackgroundKeeper.getState` | 保活失败时说不出原因 |
+| `Device.getNetworkState` | 诊断页看不出当前走的是 WiFi 还是蜂窝 |
+| `Device.appVersion` | 诊断页报不出宿主版本 |
+| `cancelRSDTunnelOpening` | 建隧道超时后残留的那次尝试取消不掉 |
+
+2.6.2 是最后一个完全不碰它们的版本，功能上只少了这些。
+装完**别去「远程资源」点检查更新** —— 那个地址永远指向最新版，一点就被拉到 2.7.x。
 
 ---
 
