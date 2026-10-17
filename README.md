@@ -21,12 +21,8 @@
 > `BackgroundKeeper.getState`、`Device.getNetworkState`、`Device.appVersion`、
 > `cancelRSDTunnelOpening` 这几个 3.3.0 才有的接口，在 3.2.1 上会静默失效。
 >
-> **还在用 App Store 版（3.2.1）、或者系统低于 iOS 27 的**，装最后一个不依赖这些
-> 接口的版本：
-> **[⬇️ 一键安装 WLOC 2.6.2](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fgithub.com%2Fios151%2FScripting%2Freleases%2Fdownload%2Fv2.6.2%2FWLOC.zip%22%5D)**
->
-> 装了 2.6.2 之后**别去「远程资源」点检查更新** —— 那个地址永远指向最新版，
-> 一点就被拉到 2.7.x 去了。
+> **iOS 27 以下目前不支持。** 不只是缺几个接口的问题——低系统上**配对那一步就走不通，
+> 拿不到 PIN**，配不上对整个脚本就没法用。原因还没排查，暂时不处理。
 
 ---
 
