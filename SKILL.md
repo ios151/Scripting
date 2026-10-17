@@ -448,6 +448,26 @@ if (Script.env !== "index") return;   // ← 2.7.1 的错
 时 reject（dts：`Audio failure resolves to false; access errors reject`）。
 按环境名预判等于替它回答，而它的答案和文档不一致。
 
+**这条问过 Scripting 作者，答复是「去掉就行」。** 不是真机碰巧能跑，是上游确认
+的行为。dts `global.d.ts:16042` 那句 `Only available in Script.env === "index"`
+到 2026-10-16 的 TF 版本为止仍然这么写，别再照它加回来。
+
+#### 但 `ScriptSession.register` 的那个判断是对的，别一起删
+
+```ts
+if (Script.env !== "index" && Script.env !== "home_screen") return;   // ← 保留
+```
+
+同样问过作者，答复是「这个没错」。和上面那条的区别在于：
+
+| | `BackgroundKeeper`（16042） | `ScriptSession.register`（170） |
+|---|---|---|
+| dts 原文 | `Only available in Script.env === "index"` | `Registers only from the main App index/home_screen` |
+| 环境枚举 | 只写了 `index`，漏了 `home_screen` | 两个都写了 |
+| 能不能问出来 | 能（返回 false / reject） | 不能，`register` 成功就给 ID |
+
+有返回值可问就别预判；没有、而且 dts 把环境列全了，那就照着列的拦。
+
 #### 在前台就申请好，回前台**不要**撤
 
 dts 的原话是 `Request keepAlive() while foregrounded, before starting

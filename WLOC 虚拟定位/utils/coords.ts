@@ -307,6 +307,51 @@ export function fromDeviceCoordinate(lat: number, lon: number): { latitude: numb
   return wgs84ToGcj02(lat, lon);
 }
 
+/** 同一个点在两套坐标系下的值。 */
+export type CoordinateReadout = {
+  /** 应用内地图系：中国大陆是 GCJ-02，境外本身就是 WGS-84。 */
+  map: { latitude: number; longitude: number };
+  /** 真正下发给设备的 WGS-84。 */
+  wgs84: { latitude: number; longitude: number };
+  /**
+   * 两者是否一致。
+   *
+   * GCJ-02 的偏移只存在于中国境内，境外 `gcj02ToWgs84` 原样返回。那时并排列出
+   * 两行一模一样的数字、还各自标一个坐标系名，是在无中生有地制造区别——
+   * 调用方据此只显示一行。
+   */
+  same: boolean;
+};
+
+/**
+ * 取当前点在两套坐标系下的值，给界面展示用。
+ *
+ * **不带扰动。** `deviceCoordinate()` 在换算之后还会按设置加随机偏移，那个值
+ * 每次下发都不一样，显示出来既对不上地图也复制不走，只会让人以为算错了。
+ * 这里要回答的是「这个点的真实坐标是多少」，扰动是另一回事。
+ */
+export function coordinateReadout(lat: number, lon: number): CoordinateReadout {
+  const map = { latitude: round6(lat), longitude: round6(lon) };
+  const converted = toDeviceCoordinate(lat, lon);
+  const wgs84 = { latitude: round6(converted.latitude), longitude: round6(converted.longitude) };
+  return {
+    map,
+    wgs84,
+    same: map.latitude === wgs84.latitude && map.longitude === wgs84.longitude,
+  };
+}
+
+/**
+ * 「纬度, 经度」，六位小数。
+ *
+ * 顺序照通行写法（Apple 地图、Google 地图、各类坐标拾取器都是纬在前），
+ * 复制出去能直接粘进别处。界面上另有一行小字点明顺序，免得和脚本里
+ * 「经度 … 纬度 …」的旧写法打架。
+ */
+export function formatLatLng(lat: number, lon: number): string {
+  return `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+}
+
 /**
  * 位置扰动：在半径内随机偏移，让静止时的轨迹更像真机。
  *

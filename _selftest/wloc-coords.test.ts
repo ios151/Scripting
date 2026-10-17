@@ -8,7 +8,11 @@
 //
 // 只用完整链接和纯文本，不碰短链：短链要联网展开，那是另一回事。
 
-import { parseAndConvert } from "../WLOC 虚拟定位/utils/coords";
+import {
+  coordinateReadout,
+  formatLatLng,
+  parseAndConvert,
+} from "../WLOC 虚拟定位/utils/coords";
 import { distanceBetween } from "../WLOC 虚拟定位/core/geo";
 
 let passed = 0;
@@ -112,6 +116,42 @@ async function main() {
       noCoord = true;
     }
     check("没有坐标时报错", noCoord);
+  }
+
+  console.log("\n[卡片上的两套坐标]");
+  {
+    // 境内：地图系和下发给设备的值必须不同，差值就是 GCJ-02 的偏移
+    const cn = coordinateReadout(LAT, LON);
+    check("境内认定两系不同", cn.same === false);
+    check(
+      "地图系原样保留（卡片上点的就是它）",
+      Math.abs(cn.map.latitude - LAT) < 1e-6 && Math.abs(cn.map.longitude - LON) < 1e-6,
+      `${cn.map.latitude},${cn.map.longitude}`,
+    );
+    const offset = distanceBetween(cn.map, cn.wgs84);
+    check("WGS-84 确实挪开了", offset > 100 && offset < 1500, `偏移 ${offset.toFixed(0)} m`);
+
+    /*
+      境外必须判成「两系一致」。
+
+      GCJ-02 的偏移只在中国境内存在，境外换算是原样返回。要是这里判成不同，
+      卡片就会并排列出两行一模一样的数字、各标一个坐标系名——无中生有的区别，
+      比不显示更糟。坐标取埃菲尔铁塔，公开地标。
+    */
+    const fr = coordinateReadout(48.858400, 2.294500);
+    check("境外认定两系一致", fr.same === true);
+    check(
+      "境外两套值真的相等",
+      fr.map.latitude === fr.wgs84.latitude && fr.map.longitude === fr.wgs84.longitude,
+      `${fr.map.latitude},${fr.map.longitude} vs ${fr.wgs84.latitude},${fr.wgs84.longitude}`,
+    );
+
+    // 复制出去的那串：纬在前、经在后、六位小数
+    check(
+      "格式化是「纬度, 经度」六位小数",
+      formatLatLng(32.0440771, 118.7849018) === "32.044077, 118.784902",
+      formatLatLng(32.0440771, 118.7849018),
+    );
   }
 
   console.log(`\n通过 ${passed} 项，失败 ${failed} 项`);

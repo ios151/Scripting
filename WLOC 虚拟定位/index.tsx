@@ -71,7 +71,14 @@ import { MovementPanel, type MovementSelection } from "./pages/MovementPanel";
 import { JoystickPad } from "./pages/JoystickPad";
 import { CellularGuide, type GuideStage } from "./pages/CellularGuide";
 import { MessageSheet, type MessageAction, type MessageTone } from "./pages/MessageSheet";
-import { applyJitter, fromDeviceCoordinate, parseAndConvert, toDeviceCoordinate } from "./utils/coords";
+import {
+  applyJitter,
+  coordinateReadout,
+  formatLatLng,
+  fromDeviceCoordinate,
+  parseAndConvert,
+  toDeviceCoordinate,
+} from "./utils/coords";
 import { openAppSettings } from "./utils/appSettings";
 import { releaseKeepAlive, retainKeepAlive } from "./utils/keepalive";
 import { loadPairing, type PairingRecord } from "./core/pairing";
@@ -917,6 +924,50 @@ export function App({ shared }: AppProps = {}) {
     const loc: ActiveLocation = { latitude: lat, longitude: lng };
     activeLoc.setValue(loc);
     saveActiveCache(loc);
+  }
+
+  /** 复制一套坐标。给个 toast——不然点完毫无反应，不知道成没成。 */
+  function copyCoord(label: string, lat: number, lng: number) {
+    Pasteboard.setString(formatLatLng(lat, lng));
+    fireToast(`已复制 ${label} 坐标`);
+  }
+
+  /** 卡片里的一行：坐标系名 + 数值 + 复制按钮。 */
+  function coordRow(label: string, point: { latitude: number; longitude: number }) {
+    return (
+      <HStack spacing={8} frame={{ maxWidth: "infinity" }}>
+        <Text font="caption2" foregroundStyle="secondaryLabel" frame={{ width: 52 }}>
+          {label}
+        </Text>
+        <Text font="subheadline" fontDesign="monospaced" foregroundStyle="label">
+          {formatLatLng(point.latitude, point.longitude)}
+        </Text>
+        <Spacer />
+        <Button
+          buttonStyle="borderless"
+          action={() => copyCoord(label, point.latitude, point.longitude)}
+        >
+          <Image systemName="doc.on.doc" foregroundStyle="systemBlue" font="caption" />
+        </Button>
+      </HStack>
+    );
+  }
+
+  /**
+   * 当前点的两套坐标。
+   *
+   * 只在 render 期间调用：里面读了 `coordLat` / `coordLng` 两个 observable，
+   * 挪到别处读就收不到更新了（SKILL 2.6）。
+   */
+  function coordReadoutRows() {
+    const readout = coordinateReadout(coordLat.value, coordLng.value);
+    return (
+      <VStack alignment="leading" spacing={6} frame={{ maxWidth: "infinity" }}>
+        {/* 境外两系相同，只留一行，并按它真实的身份标成 WGS-84 */}
+        {readout.same ? null : coordRow("GCJ-02", readout.map)}
+        {coordRow("WGS-84", readout.wgs84)}
+      </VStack>
+    );
   }
 
   /**
@@ -2756,22 +2807,45 @@ export function App({ shared }: AppProps = {}) {
           </HStack>
 
           {/*
-            坐标这一行可以点：开系统选点器。
-            地图只在手势结束时回写相机位置，没有逐帧回调，所以拖动时的跟随
-            一定不如系统那个跟手——需要精确对点时直接用它更省事。
+            两套坐标并排列出。
+
+            地图上点出来的是**地图系**（大陆 GCJ-02），而真正下发给设备、
+            别处的 GPS 工具认的是 **WGS-84**，两者在国内差几百米。以前只显示
+            前者，拿去和别的定位工具对账会以为脚本算错了——差值恰恰是对的证明。
+
+            境外两系相同（`gcj02ToWgs84` 原样返回），那时只显示一行，
+            不去无中生有地制造区别。
+
+            `handlePickFromMap` 从整行移到了「精确选点」这个按钮上：行里现在有
+            复制按钮，而 Button 套 Button 在 SwiftUI 里点击目标会打架（SKILL 2.3
+            记的是 List 行内多按钮，同一个道理）。
           */}
-          <Button action={handlePickFromMap}>
-            <HStack spacing={8} frame={{ maxWidth: "infinity" }}>
-              <Text font="subheadline" foregroundStyle="secondaryLabel">
-                {coordReady.value
-                  ? `经度 ${coordLng.value.toFixed(6)}  纬度 ${coordLat.value.toFixed(6)}`
-                  : "在地图上点一下即可选点"}
-              </Text>
-              <Spacer />
-              <Image systemName="scope" foregroundStyle="systemBlue" font="caption" />
-              <Text font="caption2" foregroundStyle="systemBlue">精确选点</Text>
-            </HStack>
-          </Button>
+          {coordReady.value ? (
+            <VStack alignment="leading" spacing={6} frame={{ maxWidth: "infinity" }}>
+              {coordReadoutRows()}
+              <HStack spacing={8} frame={{ maxWidth: "infinity" }}>
+                <Text font="caption2" foregroundStyle="tertiaryLabel">纬度, 经度</Text>
+                <Spacer />
+                <Button buttonStyle="borderless" action={handlePickFromMap}>
+                  <HStack spacing={4}>
+                    <Image systemName="scope" foregroundStyle="systemBlue" font="caption" />
+                    <Text font="caption2" foregroundStyle="systemBlue">精确选点</Text>
+                  </HStack>
+                </Button>
+              </HStack>
+            </VStack>
+          ) : (
+            <Button action={handlePickFromMap}>
+              <HStack spacing={8} frame={{ maxWidth: "infinity" }}>
+                <Text font="subheadline" foregroundStyle="secondaryLabel">
+                  在地图上点一下即可选点
+                </Text>
+                <Spacer />
+                <Image systemName="scope" foregroundStyle="systemBlue" font="caption" />
+                <Text font="caption2" foregroundStyle="systemBlue">精确选点</Text>
+              </HStack>
+            </Button>
+          )}
 
           {!!statusMsg && (
             <Text font="caption" foregroundStyle={sessionState === "active" ? "systemGreen" : "secondaryLabel"}>

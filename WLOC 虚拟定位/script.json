@@ -23,7 +23,7 @@
     "es": "",
     "it": ""
   },
-  "version": "2.7.4",
+  "version": "2.7.5",
   "author": {
     "name": "ios151",
     "email": null,
@@ -46,6 +46,7 @@
   },
   "icon": "location.fill",
   "color": "rgba(52, 199, 89,1)",
+  "iconImage": "https://raw.githubusercontent.com/ios151/-/main/wloc-day.png",
   "entry": "index.tsx",
   "permissions": [
     "vpn",
