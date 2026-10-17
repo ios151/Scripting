@@ -9,26 +9,33 @@
 
 | 要求 | 为什么 |
 |---|---|
-| **Scripting 3.3.0 (28)+** | 2.7.1 起用了 `ScriptSession`、`BackgroundKeeper.getState`、`Device.getNetworkState`、`Device.appVersion`、`cancelRSDTunnelOpening`，都是 3.3.0 才有的。**目前只在 TestFlight**，App Store 上架的是 3.2.1 |
-| **iOS 27+** | 跟着上面那条走——3.3.0 要求 iOS 27 |
+| **TestFlight 版的 Scripting** | 本机回环隧道 `VPN.localDevVPN` 只有 TF 版才有。**这是最硬的一条**：没有它，RSD、DTX 整条链路第一步就断，和 WLOC 装哪个版本无关。App Store 上架的是 3.2.1，跑不了 |
+| **3.3.0 (28)+** | 2.7.1 起用了 `ScriptSession`、`BackgroundKeeper.getState`、`Device.getNetworkState`、`Device.appVersion`、`cancelRSDTunnelOpening`。这条只用于区分 TF 的新旧版本 |
+| **iOS 27+** | 3.3.0 要求 iOS 27 |
 | **开发者模式必须开** | 设置 → 隐私与安全性 → 开发者模式。整条链路都走开发者通道 |
 | **灵动岛**（可选） | 需要带灵动岛的机型（iPhone 14 Pro 及以后）。没有的话实时活动仍会出现在锁屏和通知中心 |
 
 `script.json` 里没有写最低版本——Scripting 应用自己有下限，脚本不另外设。
 
-**协议层本身的门槛低得多**，别把这两件事混起来：`Map` 组件和 RemotePairing / RSD
-这套开发者通道都是 iOS 17 起；`featureSelectionAccessory`（点中 POI 弹系统详情卡）
-要 iOS 18；`glassEffect` 要 iOS 26，低版本退化成普通背景。上面那个 27 的门槛是
-3.3.0 带来的，不是协议层要求的。
+#### 别从「协议层只要 iOS 17」推出「低版本能用」
 
-#### 但低系统真正卡住的不是接口，是配对
+协议层的门槛确实低得多：`Map` 组件和 RemotePairing / RSD 这套开发者通道都是
+iOS 17 起；`featureSelectionAccessory`（点中 POI 弹系统详情卡）要 iOS 18；
+`glassEffect` 要 iOS 26，低版本退化成普通背景。
 
-iOS 26 上实测：脚本能跑起来、界面也正常，**配对那一步拿不到 PIN**。配不上对，
-后面整条链路都无从谈起，少几个诊断接口反而是小事。
+**但这不构成「低版本能用」**，上面三条门槛是叠加的，而且卡点一个比一个靠前：
 
-**原因未排查**（2.7.x 给 `pair_setup.ts` 补的那几条日志，低系统上正好跑不了，
-手里没有现场）。目前的决定是**不处理低系统**——别再把 2.6.2 当成低版本的替代方案
-推荐出去，它同样停在配对这一步。
+1. **App Store 版直接出局** —— 没有 `localDevVPN`，连隧道都建不起来
+2. **iOS 27 以下出局** —— 实测 iOS 26 上脚本能跑起来、界面也正常，但**配对那一步
+   拿不到 PIN**。配不上对，后面整条链路无从谈起
+3. 剩下的才是「TF 版本够不够新」的问题
+
+第 2 条**原因未排查**：2.7.x 给 `pair_setup.ts` 补的那五条配对诊断日志，恰好只在
+跑得了 2.7.x 的系统上才有，低系统上手里没有现场。真要查，得先 backport 那几条
+日志给愿意配合的用户，或者弄一台低系统设备。
+
+目前的决定是**不处理低系统**。也别再把 2.6.2 当成替代方案推荐出去——它一样卡在
+配对，而 App Store 版连回环都没有。
 
 ---
 

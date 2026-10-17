@@ -15,14 +15,18 @@
 每个脚本的详细说明、已知限制、更新记录点进「脚本」那一列。
 历史版本和更新日志在 [Releases](https://github.com/ios151/Scripting/releases)。
 
-> ### ⚠️ Scripting 3.3.0 目前只在 TestFlight
+> ### ⚠️ 必须是 TestFlight 版的 Scripting
 >
-> App Store 上架的还是 3.2.1。WLOC **2.7.1 起**用到了 `ScriptSession`、
-> `BackgroundKeeper.getState`、`Device.getNetworkState`、`Device.appVersion`、
-> `cancelRSDTunnelOpening` 这几个 3.3.0 才有的接口，在 3.2.1 上会静默失效。
+> **App Store 版（目前 3.2.1）跑不了这个脚本，装哪个 WLOC 版本都一样。**
+> 整条链路的第一步是本机回环隧道（`VPN.localDevVPN`），而那套接口只有 TestFlight
+> 版才有——没有它，后面的 RSD、DTX 全部无从谈起。
 >
-> **iOS 27 以下目前不支持。** 不只是缺几个接口的问题——低系统上**配对那一步就走不通，
-> 拿不到 PIN**，配不上对整个脚本就没法用。原因还没排查，暂时不处理。
+> **iOS 27 以下同样不支持。** 就算装上，配对那一步也**拿不到 PIN**，配不上对
+> 整个脚本就没法用。原因还没排查，暂时不处理。
+>
+> 另外 WLOC 2.7.1 起用了 `ScriptSession`、`BackgroundKeeper.getState`、
+> `Device.getNetworkState`、`Device.appVersion`、`cancelRSDTunnelOpening`
+> 五个 3.3.0 才有的接口——这条只用来区分 TF 的新旧版本，对 App Store 版没有意义。
 
 ---
 
