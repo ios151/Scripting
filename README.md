@@ -1,178 +1,103 @@
-# Scripting
+# Scripting 脚本
 
-[Scripting](https://apps.apple.com/app/id6479691128) 应用上的脚本。
+[Scripting](https://apps.apple.com/app/id6479691128) 应用上的脚本，自己写自己用，顺手公开。
 
-脚本目录直接放仓库根，发布产物在 `dist/`。
+每个脚本一个目录（判定依据是目录里有 `script.json`），发布产物统一打到 `dist/`。
 
-## WLOC 虚拟定位 2.3.2
+---
 
-### ⬇️ [点此一键安装](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FWLOC.zip%22%5D)
+## 脚本一览
 
-**在 iPhone / iPad 上用 Safari 打开这个链接**，会直接唤起 Scripting 导入。
+| 脚本 | 做什么 | 当前版本 | 要求 | 安装 |
+|---|---|---|---|---|
+| **[WLOC 虚拟定位](docs/WLOC.md)** | 用苹果官方开发者接口模拟本机定位，与 Xcode 的 Simulate Location 同一套机制 | 2.7.5 | iOS 17+ · 开发者模式 | [⬇️ 一键安装](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FWLOC.zip%22%5D) |
+
+每个脚本的详细说明、已知限制、更新记录点进「脚本」那一列。
+历史版本和更新日志在 [Releases](https://github.com/ios151/Scripting/releases)。
+
+> **Scripting 应用本身也要够新。** 这些脚本用到的一些接口（`ScriptSession`、
+> `BackgroundKeeper.getState`、`Device.appVersion` 等）是较近的版本才加的，
+> 旧版上会静默失效。装完如果行为不对，先去 App Store 更新 Scripting。
+
+---
+
+## 怎么装
+
+**必须在 iPhone / iPad 上用 Safari 打开安装链接**，会直接唤起 Scripting 导入。
 在电脑上点是没用的——那台机器上没有 Scripting。
 
-用苹果官方的开发者接口模拟本机定位，与 Xcode 的 Simulate Location 走同一套机制，不涉及证书、代理改写或系统文件。
-
-```
-本机配对（RemotePairing）→ 回环隧道 → TLS-PSK 加密隧道 → RSD 查服务 → DVT 下发坐标
-```
-
-## 能做什么
-
-**选点**
-
-地图上直接点，或点中餐厅、车站、景点这类地点直接命中（iOS 18+ 还会弹系统详情卡）。标准 / 卫星 / 混合三种图层，3D 地形和路况随时开关，3D 倾斜视角下照样能点。搜索支持国内和境外（境外走中转服务，原因见下面的已知限制），收藏和历史都在。
-
-**移动**
-
-- **沿路线**——选终点自动规划，多方案可选，支持往返多次
-- **手绘路径**——地图上依次点出几个点，按这条线走
-- **摇杆**——按住推，推得越远走得越快，松手即停；卡片能拖到屏幕任意位置
-- **GPX 轨迹**——导入现成轨迹按所选速度重走
-
-四种方式（步行 / 跑步 / 骑行 / 驾车）各三档速度，也可以自定义。
-
-**状态**
-
-锁屏卡片和灵动岛显示当前位置，锁屏上直接点「恢复真实位置」。卡片标题、灵动岛的图标颜色文字都能改。
-
-**排查**
-
-「连接状态」逐项体检，定位卡在哪一环一目了然。运行日志常驻内存，一键导出成 txt——**导出会自动脱敏**，坐标降到 1 位小数、地名和自定义文本打码、地址和设备标识只留前缀。
-
-### 2.3.2 修了什么
-
-- **「远程资源」里的链接被清空、不再自动检查更新** —— 2.3.0 跟着 GPL 一起往
-  `script.json` 塞了个 `license` 字段，而那不是 Scripting 定义的字段（文档里
-  `Script.metadata` 只列了 name / version / author / contributors /
-  remoteResource 等几项）。多出来的字段会让元数据解析不按预期走，表现就是
-  `remoteResource.url` 读不到。许可信息本来也该由 LICENSE 和 NOTICE.md 承担，
-  不该挤进 script.json
-
-> 从 2.3.0 或 2.3.1 升上来的话，装完去「远程资源」看一眼链接回来没有；
-> 空的话手动填 `https://raw.githubusercontent.com/ios151/Scripting/main/dist/WLOC.zip`
-
-### 2.3.1 改了什么
-
-- **锁屏按钮在蜂窝下也能用了** —— 判断主脚本死活的门槛原先是 3 秒，而锁屏时 iOS 会节流后台定时器，心跳隔几秒才报一次是常态；一超时就判它「死了」转去自己连设备，蜂窝下那条路本来就走不通。现在心跳只决定等多久，请求一律先投给主脚本——它被挂起时同样收得到，醒来就能用现成连接收尾
-- **失败通知说人话** —— 原先把十几行的诊断文案整个倒进通知，锁屏上只显示前两行、后面全截断。现在按错误类型给一句能照着做的
-- **实时活动被关时可一键跳设置** —— 开关在「设置 → Scripting → 实时活动」，用户多半不知道要去应用自己的设置页找
-- 修设置页三行出现两个箭头（`NavigationLink` 自带一个，`NavRow` 又画了一个）
-
-### 2.3.0 改了什么
-
-- **锁屏卡片的「恢复真实位置」真的能用了** —— 那个按钮跑在独立环境里，拿不到主脚本的会话；而会话心跳每 4 秒重发一次坐标，按钮自己连上去发的停止几秒后就被盖回去，表现是「卡片没了，定位还在」。现在主脚本在跑就交给它用现成连接收尾，主脚本被划掉了才自己连设备，**成功才收卡片**，失败留着卡片并发通知说明原因
-- **灵动岛与锁屏卡片重做** —— 收起态右侧默认放计时：那一侧只有六十来点宽，放地名或坐标必被截断（`47.591,…`），计时宽度固定、永远排得下。展开态和锁屏卡片共用同一张卡片布局
-- **大标题可自定义** —— 设置 → 锁屏与灵动岛 → 大标题，可以固定显示一句话。暂停时仍强制显示「已暂停」，不然看不出状态
-- **坐标卡加「收藏夹」入口** —— 翻已存的地点比新增更常用，可它原先只在顶部菜单里，得先展开菜单才看得到
-
-### 2.2.x 改了什么
-
-- **摇杆重做**——按哪儿帽子在哪儿（之前用的是相对位移，边缘按下时手指和帽子分家）；出力环显示推到底没有；方向跨格有触感反馈；实时显示折算速度；卡片可拖动
-- **摇杆开着时地图归你**——之前每个 tick 都在写相机位置，把用户的捏合和平移直接顶掉。现在完全不自动跟随，走出视野点准星按钮拉回来
-- **路线规划**——模拟中时起点直接用当前模拟坐标（之前去问系统定位，拿到的是几小时前的缓存，出现过起点落在一千多公里外的陈旧位置上）；加了超时和耗时日志
-- **实时活动不再堆积**——卡片活得比脚本久，而实例的 `start()` 一生只能调一次，之前第二次开模拟就静默失败
-- **日志**——常驻内存缓冲，不用改代码重跑；导出成 txt；自动脱敏；相邻重复行折叠
-- **设置页重组**——常调的留主页，配一次的收进子页
-- **蜂窝数据下的引导**（2.2.1）——5G 下开始模拟会连不上，现在弹三阶段引导并每 4 秒自动重试，按提示开关一次飞行模式即可；连上之后蜂窝照常用
-- **端口缓存失效能回退了**（2.2.1）——配对端口是动态的，缓存连不上时会清掉重新全量扫描，以前到这儿就直接报「试过 1 个端口」了
-
-### 安装
-
-**[⬇️ 一键安装 WLOC 虚拟定位](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FWLOC.zip%22%5D)** —— 在 iOS 设备上用 Safari 打开。
-
-链接长这样：
+链接的格式是：
 
 ```
 https://www.scripting.fun/import_scripts/?urls=<URL 编码的 JSON 数组>
 ```
 
-`urls` 是一个经过 URL 编码的 JSON 数组，可以一次塞多个 zip 地址。
-本仓库的产物地址是：
+`urls` 是一个经过 URL 编码的 JSON 数组，**可以一次塞多个 zip 地址**，一次装好几个脚本。
+本仓库的产物地址长这样：
 
 ```
-https://raw.githubusercontent.com/ios151/Scripting/main/dist/WLOC.zip
+https://raw.githubusercontent.com/ios151/Scripting/main/dist/<名字>.zip
 ```
 
-装好之后脚本会自己从这个地址检查更新（`script.json` 的 `remoteResource`）。
+装好之后脚本会自己从这个地址检查更新（`script.json` 里的 `remoteResource`）。
 
-### 要求
+---
 
-- **iOS 17+**，并开启开发者模式（设置 → 隐私与安全性 → 开发者模式）
-- iOS 18+ 才有「点中地点弹系统详情卡」；iOS 26+ 才有毛玻璃外观。两者缺失都只影响观感，不影响功能
-- 灵动岛需要 iPhone 14 Pro 及以后的机型；没有的话实时活动仍会出现在锁屏和通知中心
-
-### 已知限制
-
-- **蜂窝数据下要开关一次飞行模式** —— 配对服务靠 mDNS 公告自己，而蜂窝接口上没有本地链路，发现不了它（两种隧道来源都一样）。连不上时脚本会弹引导：确认隧道已连接 → 控制中心开关一次飞行模式 → 脚本自己重试到连上。**连上之后蜂窝照常用**，本地网络只在起步那一刻需要。用 WiFi 不需要这一步。
-- **金融类应用改不了位置** —— 系统会给模拟位置打 `isSimulatedBySoftware` 标记，银行、保险等据此拒绝。这属于系统机制，本项目不绕过。
-- **首次配对要去系统设置输 PIN** —— 脚本会把本机广播成可配对主机，但 PIN 只能在「设置 → 隐私与安全 → 开发者 → 配对」里输入，这一步系统不允许代劳。也可以继续用 wloc 导出的记录。
-- **更新系统后需重新配对** —— 系统更新会让设备侧的配对授权失效。本地记录还在、握手也能过，但建隧道会失败，回「配对」页重配一次即可。
-- **全球搜索依赖一个中转服务** —— 大陆 iPhone 的地图数据源是高德，没有境外 POI。
-  实测系统接口不仅搜不到，还会拿国内同名建筑顶替（搜「Eiffel Tower」返回四川的
-  山寨铁塔），所以境外搜索改走 Worker → OpenStreetMap。撞限额时可在设置里换成自建的。
-- **同时只能有一条 VPN** —— 用 Scripting 自身的隧道会顶掉正在跑的代理工具。想两者并存，把「隧道来源」设为「代理工具提供」，并装上 [dev-loopback 模块](dev-loopback/)（Loon / Surge 现成可用，Egern 自己照文档写，Quantumult X 写法未验证）。
-- **停止模拟后系统地图未必立刻回到真实位置** —— 拿 Xcode 做对照也一样，属于系统行为。打开地图 App 触发一次真实定位即可。
-- **锁屏后万一掉线** —— 后台保活是系统给的，给不给由它定；定点模式会自动重连。诊断页能看出保活有没有生效。
-
-### 发布
+## 开发
 
 ```bash
+# 类型检查。dts/ 是 Scripting 应用自带的类型定义，属于应用作者，不在本仓库内，
+# 从 Scripting 的工作区复制一份到仓库根即可
+npx -y -p typescript@5.6 tsc --noEmit -p tsconfig.json
+
+# 自测，脱机可跑，不需要设备
+npx -y tsx _selftest/<某一组>.test.ts
+
+# 打包：遍历仓库根下每个带 script.json 的目录，打成 dist/<名字>.zip
 python build-release.py
 ```
 
-遍历仓库根下每个带 `script.json` 的目录，打成 `dist/<名字>.zip`。
-**zip 根必须直接是 `script.json` 和 `index.tsx`**，多包一层目录应用就认不出来，
-构建脚本会断言这一点。
+**zip 根目录必须直接是 `script.json` 和 `index.tsx`**，多包一层目录应用就认不出来，
+`build-release.py` 会断言这一点。
 
-`script.json` 的 `remoteResource` 指向的就是这个 zip 的 raw 地址：
+### 加一个新脚本
 
-```json
-"remoteResource": {
-  "url": "https://raw.githubusercontent.com/ios151/Scripting/main/dist/WLOC.zip"
-}
-```
+1. 在仓库根建目录，放 `script.json` + `index.tsx`
+2. `script.json` 的 `remoteResource.url` 指向 `dist/<名字>.zip` 的 raw 地址
+   （**不要设 `autoUpdateInterval`**，它会按间隔自动覆盖设备上的脚本，开发期间很坑）
+3. 要换 zip 文件名的话，在 `build-release.py` 的 `ALIASES` 里加一行
+   （中文目录名直接做文件名会让 raw 链接塞满 `%E4%BD` 这种东西）
+4. `python build-release.py`
+5. 在上面那张表里加一行：名字、一句话说明、版本、要求、安装链接
+6. 详细说明写到 `docs/<名字>.md`
 
-没有设 `autoUpdateInterval` —— 设了会按间隔自动覆盖设备上的脚本，开发期间不合适。
+### 文档都在哪
 
-### 类型检查与自测
-
-`dts/` 是 Scripting 应用自带的类型定义，属于应用作者，不在本仓库内。从 Scripting 的工作区复制一份到仓库根目录即可：
-
-```bash
-npx -y -p typescript@5.6 tsc --noEmit -p tsconfig.json
-```
-
-自测脱机可跑，不需要设备（217 项）：协议编解码、球面几何与移动引擎、pair-verify、RSD、日志脱敏。
-
-## 参与开发
-
+- [docs/](docs/) —— 每个脚本一份，面向用户：能做什么、要求、已知限制
 - [CONTRIBUTING.md](CONTRIBUTING.md) —— 项目边界（哪些方向不接受）、环境、提交约定
-- [SKILL.md](SKILL.md) —— **维护手册**。协议链路怎么走、二十来个踩过的坑、
-  为什么某些地方要那么写。动 `core/` 之前先看这个。
+- [SKILL.md](SKILL.md) —— **WLOC 的维护手册**。协议链路怎么走、二十来个踩过的坑、
+  为什么某些地方要那么写。动 `WLOC 虚拟定位/core/` 之前先看这个
 
-提 issue 请用模板。Bug 那个模板里的「连接状态诊断」和日志很关键，缺了基本只能靠猜——
+提 issue 请用模板。Bug 模板里的「连接状态诊断」和日志很关键，缺了基本只能靠猜——
 日志在「设置 → 导出日志」，一键存成 txt，已自动脱敏。
 **任何情况下都不要贴配对记录或私钥。**
 
-## 致谢
-
-- **[BlackCCCat](https://github.com/BlackCCCat/Scripting-Scripts)** —— 界面基座，WLOC 的 UI 沿用自其同名脚本
-- [wloc for iOS](https://github.com/ios151/wloc) —— 协议实现参考
-- [Roam Control](https://github.com/seanhowarthdev/Roam-Control) —— 同类的原生实现（MIT），协议层可对照着读
-- [idevice](https://github.com/jkcoxson/idevice)、[pymobiledevice3](https://github.com/doronz88/pymobiledevice3) —— 协议参考
+---
 
 ## 许可
 
 **[GPL-3.0](LICENSE)**。代码随便看、随便改、随便用，但**任何衍生作品都必须同样以
 GPL-3.0 开源并提供完整源码**——拿去改一改做成闭源 App 售卖这条路，协议上走不通。
 
-第三方来源与许可范围见 [NOTICE.md](NOTICE.md)。其中一点要如实说明：界面最初基于
-BlackCCCat 的 Scripting 脚本改写，而**原脚本未声明任何许可**；协议层（`core/`）
-则是完全独立的 TypeScript 实现，未复制任何上游源码。
+第三方来源与许可范围见 [NOTICE.md](NOTICE.md)。其中一点要如实说明：WLOC 的界面
+最初基于 BlackCCCat 的 Scripting 脚本改写，而**原脚本未声明任何许可**；协议层
+（`core/`）则是完全独立的 TypeScript 实现，未复制任何上游源码。
 
 ## 声明
 
-脚本只在你自己拥有并控制的设备上运行，不上传任何位置、搜索或配对数据。配对记录存于钥匙串，仅本机可读。
+脚本只在你自己拥有并控制的设备上运行，不上传任何位置、搜索或配对数据。
+配对记录存于钥匙串，仅本机可读。
 
-位置模拟会影响所有依赖系统定位的应用。使用导航、紧急呼叫、交通出行或位置共享之前，请务必先恢复真实位置。请勿用于误导他人、伪造证据、获取无权使用的服务，或违反任何第三方服务的规则。
+位置模拟会影响所有依赖系统定位的应用。使用导航、紧急呼叫、交通出行或位置共享
+之前，请务必先恢复真实位置。请勿用于误导他人、伪造证据、获取无权使用的服务，
+或违反任何第三方服务的规则。
