@@ -796,11 +796,16 @@ export function AppsPage() {
                 trailingSwipeActions={{
                   allowsFullSwipe: false,
                   actions: [
+                    /*
+                      这里**不要**用 role="destructive"：SwiftUI 在 swipeActions 里给它配的那套动画
+                      会把整行内容推歪（真机可见，作者给的绕法就是别加这个 role）。红色自己用 tint 给，
+                      外观一样。别处不在 swipeActions 里的 destructive 按钮不受影响，照旧。
+                    */
                     <Button
                       key="uninstall"
                       title="卸载"
                       systemImage="trash"
-                      role="destructive"
+                      tint="systemRed"
                       action={() => void uninstallOne(app)}
                     />,
                   ],

@@ -1,17 +1,19 @@
 // XML plist 读写，外加「XML 或二进制都认」的统一入口。
 //
-// lockdown 一族服务（RSDCheckin 之后的 shim 服务）收发的都是 XML plist：
-// idevice 发的是 XML（`to_writer_xml`），设备照着回 XML。二进制那条路留着兜底，
-// 交给 core/bplist 处理。
+// 设备连接上的收发**不走这里**——那条路交给原生的 DeviceServices 了（见 kit/lockdown.ts）。
+// 这里剩下的是本地那几处：主屏布局备份与导出（kit/backup.ts、HomeScreenPage）写出 XML，
+// 描述文件里内嵌的那段 plist（kit/profiles.ts）读进来。二进制交给 core/bplist 处理。
 //
 // 值类型沿用 core/bplist 的 PlistValue，两边可以混用。两处取舍：
-// - `<date>` 读成 ISO 字符串。用到它的地方只是展示，不值得为它扩一个类型。
+// - `<date>` 读成 Date，写出去也认 Date。全脚本的日期就这一种表示：备份里存的是
+//   设备给的日期，恢复时得原样写回去，中间换成字符串就成了 `<string>`。
 // - 超出 JS 安全整数范围的 `<integer>` 读成**十进制字符串**，不读成 number。
 //   ECID（UniqueChipID）、电流的补码表示都会超过 2^53，转成 number 会静默丢掉
 //   末几位，显示出来是一个看着正常、其实错的数。
 
 import { decodeBplist, isBplist, PReal, PUid, type PlistValue } from "../core/bplist";
 import { fromUtf8, utf8 } from "../core/bytes";
+import { isoSeconds } from "./dates";
 
 export type PlistDict = { [key: string]: PlistValue };
 
@@ -22,7 +24,9 @@ export function isPlistDict(value: unknown): value is PlistDict {
     !Array.isArray(value) &&
     !(value instanceof Uint8Array) &&
     !(value instanceof PUid) &&
-    !(value instanceof PReal)
+    !(value instanceof PReal) &&
+    // Date 是对象，不拦住的话遍历时会被当成空字典走进去
+    !(value instanceof Date)
   );
 }
 
@@ -45,6 +49,7 @@ function encodeValue(value: PlistValue, out: string[]): void {
   } else if (value instanceof PReal) out.push(`<real>${value.value}</real>`);
   else if (value instanceof PUid) throw new Error("XML plist 不支持 UID");
   else if (typeof value === "string") out.push(`<string>${escapeXml(value)}</string>`);
+  else if (value instanceof Date) out.push(`<date>${isoSeconds(value)}</date>`);
   else if (value instanceof Uint8Array) out.push(`<data>${base64Of(value)}</data>`);
   else if (Array.isArray(value)) {
     out.push("<array>");
@@ -279,8 +284,12 @@ function parseElement(tokens: XmlTokens, open: Token, depth: number): PlistValue
       if (Number.isNaN(value)) throw new Error("plist 浮点数格式不对");
       return value;
     }
-    case "date":
-      return readText(tokens, tag).trim();
+    case "date": {
+      const raw = readText(tokens, tag).trim();
+      const at = Date.parse(raw);
+      if (Number.isNaN(at)) throw new Error(`plist 日期格式不对：${raw.slice(0, 40)}`);
+      return new Date(at);
+    }
     case "data":
       return open.selfClosing ? new Uint8Array(0) : decodeData(readText(tokens, tag), tokens.lifted);
     case "array": {

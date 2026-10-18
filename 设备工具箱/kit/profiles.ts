@@ -9,6 +9,7 @@
 import { utf8 } from "../core/bytes";
 import { debugLog } from "../core/debug";
 import type { AppEntry } from "./apps";
+import { isoSeconds } from "./dates";
 import { decodePlist, isPlistDict, type PlistDict } from "./plist";
 import type { PlistValue } from "../core/bplist";
 import { asNumber, formatValue } from "./services";
@@ -85,6 +86,9 @@ export function extractProfilePlist(blob: Uint8Array): PlistDict | null {
 }
 
 function text(value: unknown): string {
+  // 描述文件里的 ExpirationDate / CreationDate 是 <date>，解出来是 Date；
+  // 下游一路按 ISO 串用（Date.parse 比大小、formatDate 显示），这里统一成串。
+  if (value instanceof Date) return isoSeconds(value);
   return typeof value === "string" ? value : "";
 }
 

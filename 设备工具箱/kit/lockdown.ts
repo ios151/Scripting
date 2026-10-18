@@ -1,54 +1,73 @@
 // lockdown 一族服务的通用客户端：隧道内连上服务端口 → RSDCheckin → 收发 plist。
 //
-// 帧格式照 idevice 的 `send_plist` / `read_plist_value`：4 字节大端长度 + XML plist。
-// RSDCheckin 照 idevice 的 `rsd_checkin`：发一条 Request=RSDCheckin，设备先回
-// RSDCheckin、再回 StartService，两条都要读掉，之后才是服务本身的会话。
+// 帧和签到都交给 `DeviceServices`（Scripting 2026-10 更新带来的原生设备服务层）：
+// `adopt` 接管隧道连接，之后「4 字节大端长度 + plist」的收发、以及 RSDCheckin、
+// StartService 两段握手全在原生侧做，这里只剩值进值出。原先自己拼帧的那套
+// （ChunkReader、按 16384 切块写）连同它的注释一起去掉了。
+//
+// 换过来之后有两处语义变了，调用方要知道：
+//  - `<date>` 原生解成 Date 对象。老路子上 XML 的日期是 ISO 字符串、二进制 plist 的
+//    日期是 PReal（毫秒数），写回时都会退化成别的类型；现在原样是日期，写回也还是
+//    `<date>`，主屏布局的 iconModDate 因此反而更准（见 kit/layoutCheck.ts 开头第 1 条）。
+//  - 超过 2^53 的整数原生只能给 number，精度会掉（老路子读成十进制字符串保住了）。
+//    眼下只有 ECID 这一个字段真的会超，已改从 RSD 握手属性取（那边是 bigint）。
 //
 // 适用于 RSD 服务表里名字带 `.shim.remote` 的那些，以及
 // `com.apple.mobile.lockdown.remote.trusted`。
 
-import { type PlistValue } from "../core/bplist";
-import { debugLog } from "../core/debug";
-import { MAX_CHUNK, StreamClosedError, withTimeout } from "../core/stream";
+import { PReal, PUid, type PlistValue } from "../core/bplist";
+import { concat } from "../core/bytes";
+import { debugLog, describeError } from "../core/debug";
+import { BufferedReader, StreamClosedError, withTimeout, writeAll, type ByteStream } from "../core/stream";
 import { decodePlist, encodeXmlPlist, isPlistDict, type PlistDict } from "./plist";
 
-/** 单条消息的上限。壁纸预览图能到几 MB，留足余量；再大就是帧错位了。 */
-const MAX_MESSAGE = 32 * 1024 * 1024;
-/** 超过这个大小的回包在日志里记耗时。 */
-const LARGE_MESSAGE = 1024 * 1024;
+/**
+ * 单条消息的上限。`maximumFrameBytes` 只认 1 KiB–8 MiB，取顶格：
+ * 壁纸预览图和 misagent 的全量描述文件都是 MB 级的。
+ */
+const MAX_FRAME = 8 * 1024 * 1024;
+
+/** 超过这个毫秒数的回包在日志里记一笔。收包和解析现在是一次原生调用，分不开计。 */
+const SLOW_REPLY = 200;
 
 /**
- * 按块攒字节的读取器。
+ * 我们的 PlistValue → `DeviceServices` 认的那套。
  *
- * core/stream 的 BufferedReader 每来一块就整段重拼，读几 MB 的图片会拷贝上百 MB；
- * 这里把块留在数组里，凑够了只拼一次。
+ * 规则照搬原来的 encodeXmlPlist：null 和 UID 在 XML plist 里写不出去，直接报错；
+ * PReal 退成普通数字。结构没变的子树原样返回，避免把整份主屏布局拷一遍。
  */
-class ChunkReader {
-  private chunks: Uint8Array[] = [];
-  private length = 0;
-
-  constructor(private readonly connection: VPNRSDConnection) {}
-
-  async readExact(count: number): Promise<Uint8Array> {
-    while (this.length < count) {
-      const chunk = await this.connection.read(MAX_CHUNK);
-      if (!chunk || chunk.length === 0) throw new StreamClosedError();
-      this.chunks.push(chunk);
-      this.length += chunk.length;
-    }
-    const out = new Uint8Array(count);
-    let filled = 0;
-    while (filled < count) {
-      const head = this.chunks[0];
-      const take = Math.min(head.length, count - filled);
-      out.set(head.subarray(0, take), filled);
-      filled += take;
-      if (take === head.length) this.chunks.shift();
-      else this.chunks[0] = head.subarray(take);
-    }
-    this.length -= count;
-    return out;
+function toNative(value: PlistValue): DeviceServices.PlistValue {
+  if (value === null) throw new Error("plist 不能表示 null");
+  if (value instanceof PUid) throw new Error("XML plist 不支持 UID");
+  if (value instanceof PReal) return value.value;
+  if (Array.isArray(value)) {
+    let changed = false;
+    const items = value.map((item) => {
+      const next = toNative(item);
+      if (next !== (item as unknown)) changed = true;
+      return next;
+    });
+    return changed ? items : (value as unknown as DeviceServices.PlistValue);
   }
+  if (isPlistDict(value)) {
+    let changed = false;
+    const out: { [key: string]: DeviceServices.PlistValue } = {};
+    for (const [key, item] of Object.entries(value)) {
+      const next = toNative(item);
+      if (next !== (item as unknown)) changed = true;
+      out[key] = next;
+    }
+    return changed ? out : (value as unknown as DeviceServices.PlistValue);
+  }
+  return value;
+}
+
+/**
+ * 原生那层的报错只有一句英文（「Invalid device service argument.」之类），
+ * 光看它分不出是接管、签到还是收发出的问题。补上步骤名再往上抛。
+ */
+function nativeError(what: string, serviceName: string, error: unknown): Error {
+  return new Error(`${serviceName} ${what}：${describeError(error)}`);
 }
 
 /** 设备在回包里报的错。message 已经拼好了人能看的部分。 */
@@ -61,75 +80,51 @@ export class LockdownServiceError extends Error {
   }
 }
 
-export class PlistServiceClient {
-  private readonly reader: ChunkReader;
-  private closed = false;
+/**
+ * 服务连接上的 plist 一问一答。
+ *
+ * 两个后端：`PlistServiceClient` 走原生 `DeviceServices`，`RawPlistClient` 自己拼帧。
+ * 原生那层快且稳，但**解析器挑食**——真机上 `IOPMPowerSource` 那棵树的回包它就当场拒收
+ * （见 `isNativeParseFailure`）。所以 `session.withService` 默认用原生，翻车了换裸帧重来。
+ */
+export interface PlistClient {
+  readonly serviceName: string;
+  /** 这条连接上已经发出去几条。`withService` 靠它判断失败后重来安不安全。 */
+  readonly sentMessages: number;
+  send(message: PlistValue): Promise<void>;
+  receive(): Promise<PlistValue>;
+  receiveDict(): Promise<PlistDict>;
+  request(message: PlistDict, timeoutMs?: number): Promise<PlistDict>;
+  requestValue(message: PlistDict, timeoutMs?: number): Promise<PlistValue>;
+  close(): Promise<void>;
+}
 
-  private constructor(
-    private readonly connection: VPNRSDConnection,
-    readonly serviceName: string,
-  ) {
-    this.reader = new ChunkReader(connection);
+/**
+ * 原生 plist 层**解不动回包**时报的那种错。
+ *
+ * 2026-10-19 真机：电池那棵树（IOPMPowerSource / AppleSmartBattery）一问就抛
+ * `Invalid device service argument` / `ERR_INVALID_ARG_VALUE`，签到成功、5 毫秒就抛，
+ * 设备根本没来得及传数据。同一个请求换成自己拼帧、自己 `decodePlist` 就正常——
+ * 公开仓库里迁到原生层之前的版本一直是好的。
+ */
+export function isNativeParseFailure(error: unknown): boolean {
+  return /ERR_INVALID_ARG_VALUE|Invalid device service argument/i.test(describeError(error));
+}
+
+/** `send` / `receive` 之上的那几个组合，两个后端共用，别各写一遍。 */
+abstract class BasePlistClient implements PlistClient {
+  protected closed = false;
+  protected sent = 0;
+
+  constructor(readonly serviceName: string) {}
+
+  get sentMessages(): number {
+    return this.sent;
   }
 
-  /** 连上服务端口并完成 RSDCheckin。失败时连接已经关掉。 */
-  static async open(tunnel: VPNRSDTunnel, serviceName: string, port: number): Promise<PlistServiceClient> {
-    debugLog("shim", `${serviceName} 连接端口 ${port}…`);
-    const connecting = tunnel.connect({ port });
-    let connection: VPNRSDConnection;
-    try {
-      connection = await withTimeout(connecting, 10000, `${serviceName} 连接超时`);
-    } catch (error) {
-      // 超时之后才连上的要收掉，不留半开的连接
-      void connecting.then((late) => late.close()).catch(() => undefined);
-      throw error;
-    }
-    const client = new PlistServiceClient(connection, serviceName);
-    try {
-      await withTimeout(client.checkin(), 10000, `${serviceName} 签到超时`);
-      return client;
-    } catch (error) {
-      await client.close();
-      throw error;
-    }
-  }
-
-  private async checkin(): Promise<void> {
-    // Label 照 idevice 的 RSD 服务构造（`Idevice::new(stream, "")`）留空。
-    await this.send({ Label: "", ProtocolVersion: "2", Request: "RSDCheckin" });
-    const first = await this.receiveDict();
-    if (first.Request !== "RSDCheckin") throw new Error(`${this.serviceName} 签到回包不对：${String(first.Request)}`);
-    const second = await this.receiveDict();
-    if (second.Request !== "StartService") throw new Error(`${this.serviceName} 没有进入服务：${String(second.Request)}`);
-    debugLog("shim", `${this.serviceName} 签到完成`);
-  }
-
-  async send(message: PlistValue): Promise<void> {
-    if (this.closed) throw new Error("服务连接已关闭");
-    const body = encodeXmlPlist(message);
-    const frame = new Uint8Array(4 + body.length);
-    new DataView(frame.buffer).setUint32(0, body.length, false);
-    frame.set(body, 4);
-    // 隧道连接每次最多写 16384 字节，而且同时只能挂一个写——按块顺序写。
-    for (let offset = 0; offset < frame.length; offset += MAX_CHUNK) {
-      await this.connection.write(frame.subarray(offset, Math.min(offset + MAX_CHUNK, frame.length)));
-    }
-  }
-
-  async receive(): Promise<PlistValue> {
-    const header = await this.reader.readExact(4);
-    const length = new DataView(header.buffer, header.byteOffset, 4).getUint32(0, false);
-    if (length === 0 || length > MAX_MESSAGE) throw new Error(`${this.serviceName} 回包长度异常：${length}`);
-    const started = Date.now();
-    const body = await this.reader.readExact(length);
-    const received = Date.now();
-    const value = decodePlist(body);
-    // 壁纸这类大包记一下耗时：卡在收包还是解析，看日志就知道。
-    if (length >= LARGE_MESSAGE) {
-      debugLog("shim", `${this.serviceName} 大包 ${length} 字节：收 ${received - started} ms，解析 ${Date.now() - received} ms`);
-    }
-    return value;
-  }
+  abstract send(message: PlistValue): Promise<void>;
+  abstract receive(): Promise<PlistValue>;
+  abstract close(): Promise<void>;
 
   /**
    * 收一条字典回包，带 `Error` 的照 idevice 的 `read_plist` 转成异常。
@@ -172,6 +167,138 @@ export class PlistServiceClient {
       timeoutMs,
       `${this.serviceName} 响应超时`,
     );
+  }
+}
+
+/**
+ * 自己拼帧的后端：4 字节大端长度 + XML plist，照 idevice 的 `send_plist` / `read_plist_value`。
+ *
+ * 只在原生那层解不动时才用（`withService` 自动切）。连接要**先签到过**——拿到的是
+ * `rsdCheckinRaw` 之后的字节流。
+ */
+export class RawPlistClient extends BasePlistClient {
+  private readonly reader: BufferedReader;
+
+  constructor(
+    private readonly stream: ByteStream,
+    serviceName: string,
+  ) {
+    super(serviceName);
+    // reader 跟着连接走：每次新建会把上一条回包读剩的字节丢掉，下一条就从半截帧开始解。
+    this.reader = new BufferedReader(stream);
+  }
+
+  async send(message: PlistValue): Promise<void> {
+    if (this.closed) throw new Error("服务连接已关闭");
+    const body = encodeXmlPlist(message);
+    const header = new Uint8Array(4);
+    new DataView(header.buffer).setUint32(0, body.length, false);
+    await writeAll(this.stream, concat(header, body));
+    this.sent++;
+  }
+
+  async receive(): Promise<PlistValue> {
+    if (this.closed) throw new Error("服务连接已关闭");
+    const started = Date.now();
+    const lengthBytes = await this.reader.readExact(4);
+    const length = new DataView(lengthBytes.buffer as ArrayBuffer, lengthBytes.byteOffset, 4).getUint32(0, false);
+    if (length <= 0 || length > MAX_FRAME) throw new Error(`${this.serviceName} 回包长度异常 ${length}`);
+    const value = decodePlist(await this.reader.readExact(length));
+    const elapsed = Date.now() - started;
+    if (elapsed >= SLOW_REPLY) debugLog("shim", `${this.serviceName} 回包用了 ${elapsed} ms（裸帧）`);
+    return value;
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    await this.stream.close().catch(() => undefined);
+  }
+}
+
+export class PlistServiceClient extends BasePlistClient {
+  private constructor(
+    private readonly connection: DeviceServices.Connection,
+    serviceName: string,
+  ) {
+    super(serviceName);
+  }
+
+  /** 连上服务端口并完成 RSDCheckin。失败时连接已经关掉。 */
+  static async open(tunnel: VPNRSDTunnel, serviceName: string, port: number): Promise<PlistServiceClient> {
+    debugLog("shim", `${serviceName} 连接端口 ${port}…`);
+    const connecting = tunnel.connect({ port });
+    let raw: VPNRSDConnection;
+    try {
+      raw = await withTimeout(connecting, 10000, `${serviceName} 连接超时`);
+    } catch (error) {
+      // 超时之后才连上的要收掉，不留半开的连接
+      void connecting.then((late) => late.close()).catch(() => undefined);
+      throw error;
+    }
+
+    // adopt 之后这条隧道连接归原生侧独占，不能再自己读写；关也只关 plist 这一头。
+    let adopted: DeviceServices.Connection;
+    try {
+      adopted = DeviceServices.adopt(raw, { maximumFrameBytes: MAX_FRAME });
+    } catch (first) {
+      /*
+        帧上限被拒就退回原生默认的 1 MiB。大回包（misagent 的全量描述文件能到 2 MB）
+        会因此失败，但总比整条路走不通强，而且日志里留了痕，一看就知道是上限的事。
+      */
+      debugLog("shim", `${serviceName} 按 ${MAX_FRAME} 字节接管被拒，改用默认帧上限：${describeError(first)}`);
+      try {
+        adopted = DeviceServices.adopt(raw);
+      } catch (second) {
+        await raw.close().catch(() => undefined);
+        throw nativeError("接管连接失败", serviceName, second);
+      }
+    }
+    const client = new PlistServiceClient(adopted, serviceName);
+
+    try {
+      /*
+        原生的 checkin 自己发 RSDCheckin，再把 RSDCheckin 和 StartService 两条回包读掉。
+        不传 label：老路子照 idevice 的 `Idevice::new(stream, "")` 留空字符串，
+        但空串在原生那边未必算合法参数，交给它自己的默认值。
+      */
+      await withTimeout(client.connection.checkin(), 10000, `${serviceName} 签到超时`);
+      debugLog("shim", `${serviceName} 签到完成`);
+      return client;
+    } catch (error) {
+      await client.close();
+      const detail = describeError(error);
+      throw detail.includes("签到") ? new Error(detail) : nativeError("签到失败", serviceName, error);
+    }
+  }
+
+  async send(message: PlistValue): Promise<void> {
+    if (this.closed) throw new Error("服务连接已关闭");
+    // 照 idevice 发 XML：设备两种都认，但只有 XML 是验过的那条路。
+    const body = toNative(message);
+    try {
+      await this.connection.writePlist(body, { format: "xml" });
+    } catch (error) {
+      throw nativeError("发送失败", this.serviceName, error);
+    }
+    this.sent++;
+  }
+
+  async receive(): Promise<PlistValue> {
+    if (this.closed) throw new Error("服务连接已关闭");
+    const started = Date.now();
+    let value: DeviceServices.PlistValue | null;
+    try {
+      value = await this.connection.readPlist();
+    } catch (error) {
+      throw nativeError("接收失败", this.serviceName, error);
+    }
+    // readPlist 只在下一条消息的帧头之前遇到 EOF 时返回 null
+    if (value === null) throw new StreamClosedError();
+    const elapsed = Date.now() - started;
+    // 壁纸、misagent 这类大包记一下耗时：卡在这里的话日志上看得见。
+    if (elapsed >= SLOW_REPLY) debugLog("shim", `${this.serviceName} 回包用了 ${elapsed} ms`);
+    return value;
   }
 
   async close(): Promise<void> {

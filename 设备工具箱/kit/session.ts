@@ -11,11 +11,13 @@
 
 import { debugLog, describeError } from "../core/debug";
 import { discoverPairingService } from "../core/bonjour";
+import { concat } from "../core/bytes";
 import type { PairingRecord } from "../core/pairing";
 import { PairVerifyRejected, RemotePairingClient, RpPairingSocket } from "../core/rppairing";
-import { delay, withTimeout, type ByteStream } from "../core/stream";
+import { delay, MAX_CHUNK, withTimeout, type ByteStream } from "../core/stream";
 import { connectTCP, probeTCP } from "../core/tcp";
-import { PlistServiceClient } from "./lockdown";
+import { isNativeParseFailure, PlistServiceClient, RawPlistClient, type PlistClient } from "./lockdown";
+import { encodeXmlPlist } from "./plist";
 import { rsdHandshake } from "./rsd";
 import type { ConnectionSettings } from "./settings";
 
@@ -353,12 +355,59 @@ export class DeviceSession {
 
   /**
    * 借一条服务连接用完即还。连接按名额排队，签到（RSDCheckin）在这里做掉。
+   *
+   * **原生 plist 层解不动回包时，自动换一条裸帧连接把 `use` 重跑一遍**（判法见
+   * `lockdown.ts` 的 `isNativeParseFailure`；真机上电池那棵树就是这样）。
+   *
+   * 只在**第一条请求就翻车**时重来：那会儿设备侧还没被这次调用改动过，重跑是安全的。
+   * 已经收发过几轮再失败就不碰了——`use` 里可能已经写过东西，闷头重跑会做第二遍。
+   *
+   * 写操作（setIconState、Uninstall、RemoveProfile、电源那几条）理论上也可能在第一条就翻车，
+   * 那时请求**可能已经被设备执行了**，只是回包读不回来。实际上碰不到：翻车的前提是回包大/怪到
+   * 原生解析器啃不动，而写操作的回包就一个 `Status: Success`。真撞上了也无妨，这几条重做一遍
+   * 都是幂等的（再写一次同样的布局、再删一次已经没了的东西、再发一次重启）。
    */
-  async withService<T>(name: string, use: (client: PlistServiceClient) => Promise<T>): Promise<T> {
+  async withService<T>(name: string, use: (client: PlistClient) => Promise<T>): Promise<T> {
     if (this.closed) throw new Error("会话已结束，请重新连接");
     const port = this.services.get(name);
     if (!port) throw new Error(`设备没有提供 ${name}。确认开发者模式开着。`);
     const label = shortServiceName(name);
+
+    let sent = 0;
+    try {
+      return await this.runPlistService(name, port, label, false, use, (count) => {
+        sent = count;
+      });
+    } catch (error) {
+      if (!isNativeParseFailure(error) || sent > 1) throw error;
+      debugLog("session", `${label} 原生 plist 层解不动回包，换裸帧重来：${describeError(error)}`);
+      return await this.runPlistService(name, port, label, true, use, () => {});
+    }
+  }
+
+  /**
+   * 直接用**裸帧**后端借一条连接，不先试原生。
+   *
+   * 给「已经知道原生解不动」的场景用：`withService` 的自动退路只在第一条请求就翻车时管用，
+   * 而批量查询（硬件树一次问十几个节点）往往是中间某一条才翻车、前面几条已经成功——
+   * 那种情况下整批重跑既浪费又拿不到 fallback，应该由调用方挑出卡住的那几条，用这个重查。
+   */
+  async withRawPlistService<T>(name: string, use: (client: PlistClient) => Promise<T>): Promise<T> {
+    if (this.closed) throw new Error("会话已结束，请重新连接");
+    const port = this.services.get(name);
+    if (!port) throw new Error(`设备没有提供 ${name}。确认开发者模式开着。`);
+    return this.runPlistService(name, port, shortServiceName(name), true, use, () => {});
+  }
+
+  /** `withService` 的一次尝试。`raw` 决定用哪个后端。 */
+  private async runPlistService<T>(
+    name: string,
+    port: number,
+    label: string,
+    raw: boolean,
+    use: (client: PlistClient) => Promise<T>,
+    reportSent: (count: number) => void,
+  ): Promise<T> {
     const queued = Date.now();
     if (this.activeServices >= MAX_SERVICE_CONNECTIONS) {
       debugLog("session", `${label} 等空闲连接（占用 ${this.activeServices}/${MAX_SERVICE_CONNECTIONS}，前面排着 ${this.waiting.length} 个）`);
@@ -366,13 +415,23 @@ export class DeviceSession {
     await this.acquireSlot();
     const started = Date.now();
     if (started - queued > 100) debugLog("session", `${label} 排队 ${started - queued} ms 后拿到连接`);
-    let client: PlistServiceClient | null = null;
+    let client: PlistClient | null = null;
+    let connection: VPNRSDConnection | null = null;
     try {
-      client = await PlistServiceClient.open(this.tunnel, name, port);
-      debugLog("session", `${label} 连接 + 签到 ${Date.now() - started} ms`);
+      if (raw) {
+        connection = await withTimeout(this.tunnel.connect({ port }), 10000, `${label} 连接超时`);
+        const stream = await withTimeout(rsdCheckinRaw(connection, label), 15000, `${label} 签到超时`);
+        client = new RawPlistClient(stream, name);
+      } else {
+        client = await PlistServiceClient.open(this.tunnel, name, port);
+      }
+      debugLog("session", `${label} 连接 + 签到 ${Date.now() - started} ms${raw ? "（裸帧）" : ""}`);
       return await use(client);
     } finally {
+      reportSent(client?.sentMessages ?? 0);
       await client?.close();
+      // 裸帧那条路的底层连接是这里开的，得自己收；原生那条归 client 自己关。
+      if (raw) await connection?.close().catch(() => undefined);
       this.releaseSlot();
       debugLog("session", `${label} 用完归还，共 ${Date.now() - started} ms`);
     }
@@ -407,6 +466,62 @@ export class DeviceSession {
     }
   }
 
+  /**
+   * 借一条已签到的裸连接。shim.remote 服务（streaming_zip_conduit、ATC 等）需要先
+   * RSDCheckin 才接受数据，但它们的线协议不是 plist 一问一答，得拿裸字节流。
+   * 照 `工具箱提示音` 的实现：先签到，再把多读的字节拼在流头部透出去。
+   */
+  async withCheckinRawService<T>(name: string, use: (stream: ByteStream) => Promise<T>): Promise<T> {
+    if (this.closed) throw new Error("会话已结束，请重新连接");
+    const port = this.services.get(name);
+    if (!port) throw new Error(`设备没有提供 ${name}`);
+    const label = shortServiceName(name);
+    await this.acquireSlot();
+    const started = Date.now();
+    let connection: VPNRSDConnection | null = null;
+    try {
+      connection = await withTimeout(this.tunnel.connect({ port }), 10000, `${label} 连接超时`);
+      const stream = await withTimeout(rsdCheckinRaw(connection, label), 15000, `${label} 签到超时`);
+      debugLog("session", `${label} 签到+裸连接 ${Date.now() - started} ms`);
+      return await use(stream);
+    } finally {
+      await connection?.close().catch(() => undefined);
+      this.releaseSlot();
+      debugLog("session", `${label} 用完归还，共 ${Date.now() - started} ms`);
+    }
+  }
+
+  /**
+   * 借一条 AFC 连接用完即还。内部先 adopt + checkin，再调用 openAFC。
+   * 适用于需要读写 /var/mobile/Media/ 的场景。
+   */
+  async withAfcService<T>(name: string, use: (afc: DeviceServices.AFCClient) => Promise<T>): Promise<T> {
+    if (this.closed) throw new Error("会话已结束，请重新连接");
+    const port = this.services.get(name);
+    if (!port) throw new Error(`设备没有提供 ${name}`);
+    const label = shortServiceName(name);
+    await this.acquireSlot();
+    const started = Date.now();
+    let connection: VPNRSDConnection | null = null;
+    let adopted: DeviceServices.Connection | null = null;
+    let afc: DeviceServices.AFCClient | null = null;
+    try {
+      connection = await withTimeout(this.tunnel.connect({ port }), 10000, `${label} 连接超时`);
+      adopted = DeviceServices.adopt(connection, { maximumFrameBytes: 8 * 1024 * 1024 });
+      await withTimeout(adopted.checkin(), 10000, `${label} 签到超时`);
+      afc = await withTimeout(adopted.openAFC(), 10000, `${label} AFC 打开超时`);
+      debugLog("session", `${label} AFC 就绪 ${Date.now() - started} ms`);
+      return await use(afc);
+    } finally {
+      // adopt 之后 connection 归原生托管，afc.close 会一并收掉；
+      // 若 adopt 之前就出错才需要直接关 connection。
+      await afc?.close().catch(() => undefined);
+      if (!adopted) await connection?.close().catch(() => undefined);
+      this.releaseSlot();
+      debugLog("session", `${label} AFC 用完归还，共 ${Date.now() - started} ms`);
+    }
+  }
+
   /** 隧道还通不通。锁屏、断网之后它会被系统收掉。同类查询只挂一个。 */
   isAlive(): Promise<boolean> {
     if (this.closed) return Promise.resolve(false);
@@ -429,4 +544,67 @@ export class DeviceSession {
     // client.close() 先把共享密钥和流密钥清零，再关底下的配对连接。
     await this.pairing.client.close().catch(() => undefined);
   }
+}
+
+// ── RSDCheckin 手工实现 ───────────────────────────────────────────────────────
+
+/**
+ * 对 VPNRSDConnection 手工走一遍 RSDCheckin 握手，照 `工具箱提示音/kit/lockdown.ts`
+ * 的协议：4 字节大端长度 + XML plist `{Label:"", ProtocolVersion:"2", Request:"RSDCheckin"}`，
+ * 然后读掉设备回来的两条回包（RSDCheckin + StartService）。
+ * 多读的字节（如 ATC 开场推送）拼在返回流的前面，不丢。
+ */
+async function rsdCheckinRaw(conn: VPNRSDConnection, label: string): Promise<ByteStream> {
+  let buf = new Uint8Array(0);
+
+  async function absorb(): Promise<void> {
+    const chunk = await conn.read(MAX_CHUNK);
+    if (!chunk || chunk.length === 0) throw new Error(`${label} 签到：连接提前关闭`);
+    const merged = new Uint8Array(buf.length + chunk.length);
+    merged.set(buf);
+    merged.set(chunk, buf.length);
+    buf = merged;
+  }
+
+  async function readExact(n: number): Promise<Uint8Array> {
+    while (buf.length < n) await absorb();
+    const out = buf.subarray(0, n).slice();
+    buf = buf.subarray(n).slice();
+    return out;
+  }
+
+  // 发送签到消息
+  const msg = encodeXmlPlist({ Label: "", ProtocolVersion: "2", Request: "RSDCheckin" });
+  const hdr = new Uint8Array(4);
+  new DataView(hdr.buffer).setUint32(0, msg.length, false);
+  const frame = concat(hdr, msg);
+  for (let offset = 0; offset < frame.length; offset += MAX_CHUNK) {
+    await conn.write(frame.subarray(offset, Math.min(offset + MAX_CHUNK, frame.length)));
+  }
+
+  // 读掉两条回包（RSDCheckin ack + StartService）
+  for (let i = 0; i < 2; i++) {
+    const lenBuf = await readExact(4);
+    const len = new DataView(lenBuf.buffer as ArrayBuffer).getUint32(0, false);
+    if (len === 0 || len > 8 * 1024 * 1024) throw new Error(`${label} 签到回包长度异常：${len}`);
+    await readExact(len);
+  }
+
+  // buf 里剩余的是签到期间多读的字节（如 ATC 开场推送），透到流头部
+  let head = buf;
+  let headPos = 0;
+  return {
+    read: async (max: number): Promise<Uint8Array | null> => {
+      if (headPos < head.length) {
+        const take = Math.min(max, head.length - headPos);
+        const out = head.subarray(headPos, headPos + take).slice();
+        headPos += take;
+        if (headPos >= head.length) head = new Uint8Array(0);
+        return out;
+      }
+      return conn.read(max);
+    },
+    write: (data: Uint8Array) => conn.write(data),
+    close: () => conn.close(),
+  };
 }

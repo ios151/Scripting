@@ -55,6 +55,7 @@ export function clonePlist(value: PlistValue): PlistValue {
   if (value instanceof Uint8Array) return value.slice();
   if (value instanceof PReal) return new PReal(value.value);
   if (value instanceof PUid) return new PUid(value.value);
+  if (value instanceof Date) return new Date(value.getTime());
   if (Array.isArray(value)) return value.map(clonePlist);
   if (isPlistDict(value)) {
     const out: { [key: string]: PlistValue } = {};

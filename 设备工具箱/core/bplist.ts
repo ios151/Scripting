@@ -16,6 +16,11 @@ export class PReal {
   constructor(readonly value: number) {}
 }
 
+/**
+ * 这里的解码器不产生 Date——二进制 plist 的日期解成 PReal（毫秒数）。
+ * `Date` 是给 kit/lockdown.ts 那条路留的：原生的 DeviceServices 解出来就是 Date 对象，
+ * 两边的值要能混着用，类型得认它。
+ */
 export type PlistValue =
   | null
   | boolean
@@ -23,6 +28,7 @@ export type PlistValue =
   | PReal
   | PUid
   | string
+  | Date
   | Uint8Array
   | PlistValue[]
   | { [key: string]: PlistValue };

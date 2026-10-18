@@ -10,6 +10,14 @@ function pad(value: number): string {
   return String(value).padStart(2, "0");
 }
 
+/**
+ * 2026-10-18T03:45:07Z。只有这一个是 UTC：plist 的 `<date>` 就是这个格式，
+ * 毫秒不写（苹果自己也不写），描述文件的到期时间也按它存。
+ */
+export function isoSeconds(at: Date): string {
+  return at.toISOString().replace(/\.\d+Z$/, "Z");
+}
+
 /** 2026-10-18 */
 export function ymd(at: number | Date): string {
   const date = at instanceof Date ? at : new Date(at);

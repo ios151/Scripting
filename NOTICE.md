@@ -14,6 +14,7 @@
 |---|---|
 | `core/` 协议层 | 本项目独立实现（见下） |
 | `pages/`、`index.tsx` 等界面 | 在 BlackCCCat 的脚本基础上改写（见下） |
+| `设备工具箱/kit/airlift.ts`、`atc.ts`、`airbeep.ts` | 思路来自 @Waa404，实现为本项目重写（见下） |
 | `_selftest/` | 本项目原创 |
 | `dev-loopback/` | 本项目原创 |
 | `dts/` | **不在本仓库内**，属于 Scripting 应用作者 |
@@ -57,6 +58,33 @@ HTTP/2 与 RemoteXPC、RSD 服务发现、DTX 消息帧——均为本项目的�
 > `10.7.0.1` / `10.7.1.1` 这组回环地址沿用
 > [LocalDevVPN](https://github.com/jkcoxson/LocalDevVPN) 的约定，以便已有工具
 > 无需改动即可配合使用。这是接口约定而非代码复用。
+
+---
+
+## 通话录音提示音（@Waa404）
+
+设备工具箱里「通话录音提示音」那一页，把系统「正在录音」的播报声换成静音文件。
+它要动的两个文件在 `/var/mobile/Library/CallServices/Greetings/default/`——**媒体域之外**，
+AFC 够不着。走通这条路要三步：`com.apple.streaming_zip_conduit` 把一个带符号链接的 zip
+解进媒体域；往 `Books/Sync/Books.plist` 写一份资产清单；再借 AirTraffic（`com.apple.atc`）
+的同步，顺着那条符号链接把文件搬到媒体域之外。关键在符号链接的内容写成 `../../../<目标目录>`。
+
+**这条链是 @Waa404 趟出来的**，本项目的实现在他的方案基础上重写。相对原方案改的几处
+（每一条的来由都写在 `设备工具箱/kit/airlift.ts` 的文件头）：
+
+- 读回轮询**复用同一条 AFC 连接**——每轮重借要四趟往返，真实探测间隔会被拉到秒级，
+  抓不住设备把文件搬过来的那一瞬
+- 同一个目录下的文件凑成一轮写回（读仍然一个文件一轮：真机实测设备一轮只收一个越界资产）
+- 读不到时**保留**媒体域里的 `airlift-recovered-*`——这条链的读是搬运式的，读超时那会儿
+  原路径上的文件已经没了，那一份是用户仅存的
+- 默认不做读回校验：校验要多跑三轮、占掉整个操作四分之三的时间，还时灵时不灵
+
+协议细节另外对照了 [idevice](https://github.com/jkcoxson/idevice) 和
+[pymobiledevice3](https://github.com/doronz88/pymobiledevice3)（已列在上一节）。
+
+> **@Waa404 没有公开仓库，这里只署名致谢**，因此无从标注许可。和 BlackCCCat 那一节
+> 同样的态度：若原作者对此有任何异议，请通过 GitHub Issue 联系，我们会立即配合调整
+> 或移除相关部分。
 
 ---
 

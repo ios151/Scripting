@@ -94,3 +94,27 @@ export function readU16LE(bytes: Uint8Array, offset: number): number {
 export function readU16BE(bytes: Uint8Array, offset: number): number {
   return new DataView(bytes.buffer as ArrayBuffer, bytes.byteOffset).getUint16(offset, false);
 }
+
+export function readU64LE(bytes: Uint8Array, offset: number): number {
+  return Number(new DataView(bytes.buffer as ArrayBuffer, bytes.byteOffset).getBigUint64(offset, true));
+}
+
+export function randomHex(byteCount: number): string {
+  let out = "";
+  for (let index = 0; index < byteCount; index++) {
+    out += Math.floor(Math.random() * 256).toString(16).padStart(2, "0");
+  }
+  return out;
+}
+
+/**
+ * 把运行时给的字节统一成 Uint8Array。
+ * FileManager.readAsBytesSync 有时回 ArrayBuffer，原生 Data 带 toUint8Array()。
+ */
+export function toBytes(value: unknown): Uint8Array {
+  if (value instanceof Uint8Array) return value;
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  const converted = (value as { toUint8Array?: () => Uint8Array } | null | undefined)?.toUint8Array?.();
+  if (converted) return converted;
+  throw new TypeError(`认不出的字节类型：${Object.prototype.toString.call(value)}`);
+}

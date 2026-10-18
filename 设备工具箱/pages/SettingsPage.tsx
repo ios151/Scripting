@@ -3,7 +3,7 @@
 
 import { Button, List, Picker, Section, Text, TextField, Toggle, useState } from "scripting";
 import { clearDebugLog, debugEcho, debugLogCount, debugLogText, setDebugEcho } from "../core/debug";
-import { copyWithFeedback } from "./common";
+import { copyWithFeedback, exportText } from "./common";
 import { deviceHub } from "../kit/hub";
 import {
   DEFAULT_HOST,
@@ -85,6 +85,13 @@ export function SettingsPage() {
             setEcho(on);
             setNote(on ? "✓ 新日志会同时打到 scripting-cli 的终端" : "✓ 已停止往终端刷");
           }}
+        />
+        {/* 日志动辄上千行，复制粘贴到哪里都截断。导出放在前面 */}
+        <Button
+          title={`导出成 txt（${count} 条）`}
+          systemImage="square.and.arrow.up"
+          disabled={count === 0}
+          action={() => void exportText("调试日志", debugLogText()).then(setNote)}
         />
         <Button
           title={`复制日志（${count} 条）`}

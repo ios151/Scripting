@@ -11,7 +11,7 @@
 | 脚本 | 做什么 | 当前版本 | 要求 | 安装 |
 |---|---|---|---|---|
 | **[WLOC 虚拟定位](docs/WLOC.md)** | 用苹果官方开发者接口模拟本机定位，与 Xcode 的 Simulate Location 同一套机制 | 2.7.5 | iOS 27+ · Scripting 3.3.0+ · 开发者模式 | [⬇️ 一键安装](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FWLOC.zip%22%5D) |
-| **[设备工具箱](docs/设备工具箱.md)** | 走同一条开发者通道管本机：设备信息、电池健康、主屏布局、应用管理、签名诊断、实时性能 | 1.0.1 | iOS 27+ · TestFlight 版 Scripting · 开发者模式 | [⬇️ 一键安装](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FDeviceToolbox.zip%22%5D) |
+| **[设备工具箱](docs/设备工具箱.md)** | 走同一条开发者通道管本机：设备信息、电池健康、主屏布局、应用管理、配置描述文件、签名诊断、实时性能、硬件规格、通话录音提示音 | 2.1.0 | iOS 27+ · TestFlight 版 Scripting · 开发者模式 | [⬇️ 一键安装](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FDeviceToolbox.zip%22%5D) |
 
 每个脚本的详细说明、已知限制、更新记录点进「脚本」那一列。
 历史版本和更新日志在 [Releases](https://github.com/ios151/Scripting/releases)。

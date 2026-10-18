@@ -18,29 +18,32 @@ import {
   NavigationStack,
   ProgressView,
   Script,
-  Section,
   Spacer,
   Text,
   VStack,
   useEffect,
   useState,
   type Color,
+  type VirtualNode,
 } from "scripting";
 import { describeError } from "./core/debug";
 import { loadPairing } from "./core/pairing";
 import { deviceHub } from "./kit/hub";
 import { LINK_LABEL, linkHint, needsAttention, watchLink, type LinkKind } from "./kit/network";
 import { AppsPage } from "./pages/AppsPage";
+import { ConfigProfilesPage } from "./pages/ConfigProfilesPage";
 import { BatteryPage } from "./pages/BatteryPage";
 import { CacheSection } from "./pages/CacheSection";
 import { EventsPage } from "./pages/EventsPage";
-import { GestaltPage } from "./pages/GestaltPage";
+import { LowLevelPage } from "./pages/LowLevelPage";
 import { HomeScreenPage } from "./pages/HomeScreenPage";
 import { InfoPage } from "./pages/InfoPage";
 import { PairingPage } from "./pages/PairingPage";
+import { FoldableSection, SectionLabel } from "./pages/common";
 import { PowerSection } from "./pages/PowerSection";
 import { ProfilesPage } from "./pages/ProfilesPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { BeepPage } from "./pages/BeepPage";
 import { SignCheckPage } from "./pages/SignCheckPage";
 import { SysmonPage } from "./pages/SysmonPage";
 
@@ -119,6 +122,33 @@ export function App() {
     setPaired(loadPairing() !== null);
   }
 
+  /*
+    功能列表写成数据：组标题上要显示「N 项」，摆成数组才数得出来，加减一项也只动一行。
+    放在组件里每次渲染重建，和原先直接内联写 JSX 是一回事。
+  */
+  const features: {
+    key: string;
+    title: string;
+    subtitle: string;
+    systemImage: string;
+    color: Color;
+    page: VirtualNode;
+  }[] = [
+    { key: "info", title: "设备信息", subtitle: "型号、系统、存储、序列号", systemImage: "iphone", color: "systemBlue", page: <InfoPage /> },
+    { key: "battery", title: "电池健康", subtitle: "循环次数、设计与满充容量、温度", systemImage: "battery.75percent", color: "systemGreen", page: <BatteryPage /> },
+    { key: "home", title: "主屏布局", subtitle: "查看、备份、导出成图", systemImage: "square.grid.3x3.fill", color: "systemIndigo", page: <HomeScreenPage /> },
+    { key: "apps", title: "应用管理", subtitle: "版本、占用空间、安装来源，卸载", systemImage: "square.stack.3d.up.fill", color: "systemOrange", page: <AppsPage /> },
+    { key: "profiles", title: "签名到期", subtitle: "描述文件还剩几天，谁在用", systemImage: "checkmark.seal.fill", color: "systemTeal", page: <ProfilesPage /> },
+    { key: "configs", title: "配置描述文件", subtitle: "VPN、根证书、桌面图标，设置里那些", systemImage: "doc.badge.gearshape", color: "systemBrown", page: <ConfigProfilesPage /> },
+    { key: "signcheck", title: "签名检查", subtitle: "自签的包为什么装不上 / 打不开", systemImage: "signature", color: "systemPurple", page: <SignCheckPage /> },
+    { key: "sysmon", title: "实时性能", subtitle: "CPU、内存、进程占用", systemImage: "speedometer", color: "systemRed", page: <SysmonPage /> },
+    { key: "events", title: "系统事件", subtitle: "实时看系统内部在发什么事件", systemImage: "bolt.horizontal.circle.fill", color: "systemYellow", page: <EventsPage /> },
+    { key: "lowlevel", title: "底层", subtitle: "硬件规格、硬件树、设备服务", systemImage: "cpu", color: "systemPink", page: <LowLevelPage /> },
+    // speaker.slash 而不是 bell.slash：这页关的是「正在录音」的**播报声**，
+    // 铃铛那个容易被当成通知静音。颜色也从 systemGray 换掉——整列就它最看不见。
+    { key: "beep", title: "通话录音提示音", subtitle: "静音通话提示音（ios27-27b2）其他未测试", systemImage: "speaker.slash.fill", color: "systemMint", page: <BeepPage /> },
+  ];
+
   return (
     <NavigationStack>
       <List
@@ -130,8 +160,16 @@ export function App() {
         */
         toolbar={IS_HOME_TAB ? undefined : { cancellationAction: <Button title="退出" action={() => dismiss()} /> }}
       >
-        <Section
-          header={<Text>连接</Text>}
+        {/* 连接前要确认的东西都在这一组：连不连得上、走的什么网、配没配对、连接怎么设的。 */}
+        <FoldableSection
+          id="connect"
+          label={
+            <SectionLabel
+              title="连接与设置"
+              note={connected ? "已连接" : paired ? "未连接" : "未配对"}
+              tint={connected ? "systemGreen" : paired ? "secondaryLabel" : "systemOrange"}
+            />
+          }
           footer={
             <Text foregroundStyle={error ? "systemRed" : linkWarning ? "systemOrange" : "tertiaryLabel"}>
               {error ||
@@ -165,41 +203,6 @@ export function App() {
               <Text foregroundStyle={needsAttention(link) ? "systemOrange" : "secondaryLabel"}>{LINK_LABEL[link]}</Text>
             </HStack>
           )}
-        </Section>
-
-        <Section header={<Text>功能</Text>}>
-          <NavigationLink destination={<InfoPage />}>
-            <FeatureRow title="设备信息" subtitle="型号、系统、存储、序列号" systemImage="iphone" color="systemBlue" />
-          </NavigationLink>
-          <NavigationLink destination={<BatteryPage />}>
-            <FeatureRow title="电池健康" subtitle="循环次数、设计与满充容量、温度" systemImage="battery.75percent" color="systemGreen" />
-          </NavigationLink>
-          <NavigationLink destination={<HomeScreenPage />}>
-            <FeatureRow title="主屏布局" subtitle="查看、备份、导出成图" systemImage="square.grid.3x3.fill" color="systemIndigo" />
-          </NavigationLink>
-          <NavigationLink destination={<AppsPage />}>
-            <FeatureRow title="应用管理" subtitle="版本、占用空间、安装来源，卸载" systemImage="square.stack.3d.up.fill" color="systemOrange" />
-          </NavigationLink>
-          <NavigationLink destination={<ProfilesPage />}>
-            <FeatureRow title="签名到期" subtitle="描述文件还剩几天，谁在用" systemImage="checkmark.seal.fill" color="systemTeal" />
-          </NavigationLink>
-          <NavigationLink destination={<SignCheckPage />}>
-            <FeatureRow title="签名检查" subtitle="自签的包为什么装不上 / 打不开" systemImage="signature" color="systemPurple" />
-          </NavigationLink>
-          <NavigationLink destination={<SysmonPage />}>
-            <FeatureRow title="实时性能" subtitle="CPU、内存、进程占用" systemImage="speedometer" color="systemRed" />
-          </NavigationLink>
-          <NavigationLink destination={<EventsPage />}>
-            <FeatureRow title="系统事件" subtitle="实时看系统内部在发什么事件" systemImage="bolt.horizontal.circle.fill" color="systemYellow" />
-          </NavigationLink>
-          <NavigationLink destination={<GestaltPage />}>
-            <FeatureRow title="底层查询" subtitle="MobileGestalt 属性、开发者磁盘镜像" systemImage="magnifyingglass.circle.fill" color="systemPink" />
-          </NavigationLink>
-        </Section>
-
-        {paired ? <PowerSection /> : null}
-
-        <Section header={<Text>设置</Text>}>
           <NavigationLink destination={<PairingPage onChanged={refreshPairing} />}>
             <HStack>
               <Text>配对</Text>
@@ -210,7 +213,22 @@ export function App() {
           <NavigationLink destination={<SettingsPage />}>
             <Text>连接设置</Text>
           </NavigationLink>
-        </Section>
+        </FoldableSection>
+
+        <FoldableSection id="features" label={<SectionLabel title="功能" note={`${features.length} 项`} />}>
+          {features.map((feature) => (
+            <NavigationLink key={feature.key} destination={feature.page}>
+              <FeatureRow
+                title={feature.title}
+                subtitle={feature.subtitle}
+                systemImage={feature.systemImage}
+                color={feature.color}
+              />
+            </NavigationLink>
+          ))}
+        </FoldableSection>
+
+        {paired ? <PowerSection /> : null}
 
         <CacheSection />
       </List>

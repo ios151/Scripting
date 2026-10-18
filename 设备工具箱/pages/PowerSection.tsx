@@ -1,9 +1,10 @@
 // 首页的「电源」一节：重启、关机、睡眠。每个都要二次确认；执行后隧道会断，顺手断开会话。
 
-import { Button, HStack, ProgressView, Section, Text, useState } from "scripting";
+import { Button, HStack, ProgressView, Text, useState } from "scripting";
 import { describeError } from "../core/debug";
 import { deviceHub } from "../kit/hub";
 import { powerAction, type PowerAction } from "../kit/services";
+import { FoldableSection, SectionLabel } from "./common";
 
 interface PowerItem {
   action: PowerAction;
@@ -58,8 +59,9 @@ export function PowerSection() {
   }
 
   return (
-    <Section
-      header={<Text>电源</Text>}
+    <FoldableSection
+      id="power"
+      label={<SectionLabel title="电源" note={busy ? `${busy}…` : undefined} />}
       footer={
         <Text foregroundStyle={error ? "systemRed" : "tertiaryLabel"}>
           {error || "实体按键不好按、或者想重启一下解决卡顿时用。都会先弹窗确认。"}
@@ -82,6 +84,6 @@ export function PowerSection() {
           />
         ))
       )}
-    </Section>
+    </FoldableSection>
   );
 }

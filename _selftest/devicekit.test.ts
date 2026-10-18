@@ -1,12 +1,12 @@
 // 离线自测（Node 里跑，不碰 Scripting 的原生 API）。
-//   npx -y -p tsx tsx _selftest/toolbox.test.ts
+//   npx -y -p tsx tsx _selftest/devicekit.test.ts
 //
 // 样本一律虚构：序列号、UDID、ECID 都是一眼看得出是编的那种。
 
-import { encodeBplist } from "../设备工具箱/core/bplist";
-import { utf8 } from "../设备工具箱/core/bytes";
-import { PlistServiceClient, LockdownServiceError } from "../设备工具箱/kit/lockdown";
-import { decodePlist, decodeXmlPlist, encodeXmlPlist, isPlistDict } from "../设备工具箱/kit/plist";
+import { encodeBplist, PReal } from "../scripts/设备工具箱/core/bplist";
+import { utf8 } from "../scripts/设备工具箱/core/bytes";
+import { PlistServiceClient, LockdownServiceError } from "../scripts/设备工具箱/kit/lockdown";
+import { decodePlist, decodeXmlPlist, encodeXmlPlist, isPlistDict } from "../scripts/设备工具箱/kit/plist";
 import {
   collectBundleIds,
   parseBattery,
@@ -14,11 +14,15 @@ import {
   readDeviceInfo,
   readHomeLayout,
   readIcons,
-} from "../设备工具箱/kit/services";
-import { isTunnelDropped, type DeviceSession } from "../设备工具箱/kit/session";
-import { clearDebugLog, debugEcho, debugLog, debugLogCount, debugLogText } from "../设备工具箱/core/debug";
-import { DEFAULT_HOST, normalizeHost, normalizeSettings } from "../设备工具箱/kit/settings";
-import { LINK_LABEL, classifyLink, linkHint, needsAttention, type LinkKind } from "../设备工具箱/kit/network";
+} from "../scripts/设备工具箱/kit/services";
+import { isTunnelDropped, type DeviceSession } from "../scripts/设备工具箱/kit/session";
+import { clearDebugLog, debugEcho, debugLog, debugLogCount, debugLogText } from "../scripts/设备工具箱/core/debug";
+import { baseName, classify, describeServices, listText } from "../scripts/设备工具箱/kit/serviceList";
+import { IO_PRESETS, isRegistryKey, queryText, resultsText } from "../scripts/设备工具箱/kit/ioregistry";
+import { buildSpec, countBits, fixed16, leNumber, machToHz, specText } from "../scripts/设备工具箱/kit/hardwareSpec";
+import { classifyProfile, parseProfiles, profilesText, removeConfigProfile } from "../scripts/设备工具箱/kit/configProfiles";
+import { DEFAULT_HOST, normalizeHost, normalizeSettings } from "../scripts/设备工具箱/kit/settings";
+import { LINK_LABEL, classifyLink, linkHint, needsAttention, type LinkKind } from "../scripts/设备工具箱/kit/network";
 import {
   allKeys,
   arrangementKey,
@@ -28,9 +32,9 @@ import {
   dockToPage,
   moveInDock,
   withWidgetIdentifiers,
-} from "../设备工具箱/kit/homeEdit";
-import { applyPlan, collectFolderApps, collectLooseApps, colorFolderLayout, dissolveFolders, reorderLooseApps, sanitizePlan, sortLooseApps } from "../设备工具箱/kit/homeOrganize";
-import { COLOR_BUCKETS, colorBucket, colorKey, compareColorKeys } from "../设备工具箱/kit/colorSort";
+} from "../scripts/设备工具箱/kit/homeEdit";
+import { applyPlan, collectFolderApps, collectLooseApps, colorFolderLayout, dissolveFolders, reorderLooseApps, sanitizePlan, sortLooseApps } from "../scripts/设备工具箱/kit/homeOrganize";
+import { COLOR_BUCKETS, colorBucket, colorKey, compareColorKeys } from "../scripts/设备工具箱/kit/colorSort";
 import {
   askOrganizer,
   extractJson,
@@ -50,8 +54,8 @@ import {
   saveStylePrompt,
   transientReason,
   STYLE_PROMPT_LIMIT,
-} from "../设备工具箱/kit/aiOrganize";
-import type { PlistValue } from "../设备工具箱/core/bplist";
+} from "../scripts/设备工具箱/kit/aiOrganize";
+import type { PlistValue } from "../scripts/设备工具箱/core/bplist";
 import {
   appListText,
   classifyApp,
@@ -70,7 +74,7 @@ import {
   withSizes,
   type AppEntry,
   type AppSizes,
-} from "../设备工具箱/kit/apps";
+} from "../scripts/设备工具箱/kit/apps";
 import {
   DEFAULT_ROW_ACTIONS,
   ROW_ACTIONS,
@@ -80,7 +84,7 @@ import {
   sanitizeRowActions,
   toggleRowAction,
   type RowActionId,
-} from "../设备工具箱/kit/rowActions";
+} from "../scripts/设备工具箱/kit/rowActions";
 import {
   appsForProfile,
   expiryState,
@@ -89,11 +93,11 @@ import {
   readProfiles,
   removeProfile,
   sortProfiles,
-} from "../设备工具箱/kit/profiles";
-import { flattenSorted, formatBytes, isGestaltKey, powerAction, readMobileGestalt } from "../设备工具箱/kit/services";
-import { readImageStatus } from "../设备工具箱/kit/imageMounter";
-import { inferPageSize, memoryBreakdown, parseSample } from "../设备工具箱/kit/sysmon";
-import { EVENT_GROUPS, EVENT_KINDS, describeEvent, watchEvents } from "../设备工具箱/kit/notifications";
+} from "../scripts/设备工具箱/kit/profiles";
+import { flattenSorted, formatBytes, formatValue, powerAction, printableText } from "../scripts/设备工具箱/kit/services";
+import { readImageStatus } from "../scripts/设备工具箱/kit/imageMounter";
+import { inferPageSize, memoryBreakdown, parseSample } from "../scripts/设备工具箱/kit/sysmon";
+import { EVENT_GROUPS, EVENT_KINDS, describeEvent, watchEvents } from "../scripts/设备工具箱/kit/notifications";
 import {
   appIdMatches,
   diagnose,
@@ -104,13 +108,13 @@ import {
   subjectOf,
   summarize,
   type DeviceEnv,
-} from "../设备工具箱/kit/signCheck";
-import { earliestCertificate, type ProfileEntry } from "../设备工具箱/kit/profiles";
-import { parseCertTime, parseCertificate } from "../设备工具箱/kit/x509";
-import { clockLabel, clockOffsetDays, isClockShifted, resetClock, shiftClock, simulatedNow } from "../设备工具箱/kit/testClock";
-import { entitlementsOf, readAppDetail, urlSchemes } from "../设备工具箱/kit/apps";
-import { deviceHub } from "../设备工具箱/kit/hub";
-import { cacheSizeText, totalCacheBytes } from "../设备工具箱/kit/cache";
+} from "../scripts/设备工具箱/kit/signCheck";
+import { earliestCertificate, type ProfileEntry } from "../scripts/设备工具箱/kit/profiles";
+import { parseCertTime, parseCertificate } from "../scripts/设备工具箱/kit/x509";
+import { clockLabel, clockOffsetDays, isClockShifted, resetClock, shiftClock, simulatedNow } from "../scripts/设备工具箱/kit/testClock";
+import { entitlementsOf, readAppDetail, urlSchemes } from "../scripts/设备工具箱/kit/apps";
+import { deviceHub } from "../scripts/设备工具箱/kit/hub";
+import { cacheSizeText, totalCacheBytes } from "../scripts/设备工具箱/kit/cache";
 import {
   clearStoreLinkCache,
   countriesFor,
@@ -119,7 +123,7 @@ import {
   lookupUrl,
   parseLookup,
   shareText,
-} from "../设备工具箱/kit/appStore";
+} from "../scripts/设备工具箱/kit/appStore";
 import {
   CURVE_LIMIT,
   appendSample,
@@ -129,7 +133,7 @@ import {
   formatMetric,
   formatSpan,
   type CurveSample,
-} from "../设备工具箱/kit/batteryCurve";
+} from "../scripts/设备工具箱/kit/batteryCurve";
 import {
   HISTORY_LIMIT,
   cardState,
@@ -139,10 +143,10 @@ import {
   shouldEndOnUnplug,
   sparkHeights,
   statusText,
-} from "../设备工具箱/kit/batteryCard";
-import type { BatteryReport } from "../设备工具箱/kit/services";
-import { suspiciousValues, widgetDiff, widgetEntries } from "../设备工具箱/kit/layoutCheck";
-import { PReal } from "../设备工具箱/core/bplist";
+} from "../scripts/设备工具箱/kit/batteryCard";
+import type { BatteryReport } from "../scripts/设备工具箱/kit/services";
+import { suspiciousValues, widgetDiff, widgetEntries } from "../scripts/设备工具箱/kit/layoutCheck";
+import { PReal } from "../scripts/设备工具箱/core/bplist";
 
 let passed = 0;
 let failed = 0;
@@ -206,6 +210,86 @@ class FakeConnection {
     this.closed = true;
   }
 }
+
+/**
+ * 原生 `DeviceServices` 的替身。
+ *
+ * kit/lockdown.ts 把帧和签到都交给了它，而 Node 里没有这个全局。这里照 dts 写的
+ * 行为实现一份：4 字节大端长度 + plist 一帧，checkin 发 RSDCheckin、再把
+ * RSDCheckin 和 StartService 两条回包读掉。于是下面的断言核对的仍然是
+ * **我们这一侧发出去的协议**对不对，只是中间多了一层照着文档写的桥。
+ */
+class FakePlistConnection {
+  private buffer = new Uint8Array(0);
+
+  constructor(
+    private readonly raw: FakeConnection,
+    private readonly maximumFrameBytes: number,
+  ) {}
+
+  private async readExact(count: number): Promise<Uint8Array> {
+    while (this.buffer.length < count) {
+      const chunk = await this.raw.read(16384);
+      if (!chunk || chunk.length === 0) throw new Error("连接已被对端关闭");
+      const merged = new Uint8Array(this.buffer.length + chunk.length);
+      merged.set(this.buffer);
+      merged.set(chunk, this.buffer.length);
+      this.buffer = merged;
+    }
+    const out = this.buffer.subarray(0, count);
+    this.buffer = this.buffer.subarray(count);
+    return out;
+  }
+
+  async writePlist(value: PlistValue, options?: { format?: "binary" | "xml" }): Promise<void> {
+    if (options?.format !== "xml") throw new Error("替身只实现了 XML");
+    const body = encodeXmlPlist(value);
+    if (body.length > this.maximumFrameBytes) throw new Error("帧超过上限");
+    const out = new Uint8Array(4 + body.length);
+    new DataView(out.buffer).setUint32(0, body.length, false);
+    out.set(body, 4);
+    // 底下那条隧道连接每次只收 16384 字节，切块是原生侧的事
+    for (let offset = 0; offset < out.length; offset += 16384) {
+      await this.raw.write(out.subarray(offset, Math.min(offset + 16384, out.length)));
+    }
+  }
+
+  async readPlist(): Promise<PlistValue | null> {
+    let header: Uint8Array;
+    try {
+      header = await this.readExact(4);
+    } catch {
+      return null; // 下一条消息的帧头之前就 EOF
+    }
+    const length = new DataView(header.buffer, header.byteOffset, 4).getUint32(0, false);
+    if (length === 0 || length > this.maximumFrameBytes) throw new Error(`帧长度异常：${length}`);
+    return decodePlist(await this.readExact(length));
+  }
+
+  async checkin(options?: { label?: string }): Promise<void> {
+    await this.writePlist({ Label: options?.label ?? "", ProtocolVersion: "2", Request: "RSDCheckin" }, { format: "xml" });
+    const first = await this.readPlist();
+    if (!isPlistDict(first) || first.Request !== "RSDCheckin") throw new Error("签到回包不对");
+    const second = await this.readPlist();
+    if (!isPlistDict(second) || second.Request !== "StartService") throw new Error("没有进入服务");
+  }
+
+  async openAFC(): Promise<never> {
+    throw new Error("替身没实现 AFC");
+  }
+
+  async close(): Promise<void> {
+    await this.raw.close();
+  }
+}
+
+(globalThis as Record<string, unknown>).DeviceServices = {
+  adopt: (source: object, options?: { maximumFrameBytes?: number }) =>
+    new FakePlistConnection(source as FakeConnection, options?.maximumFrameBytes ?? 1048576),
+  connect: async () => {
+    throw new Error("替身只支持 adopt");
+  },
+};
 
 function fakeTunnel(connection: FakeConnection): VPNRSDTunnel {
   return {
@@ -280,7 +364,10 @@ async function main() {
     const parsed = decodeXmlPlist(device);
     check("超出安全整数的 integer 保留为十进制字符串", isPlistDict(parsed) && parsed.UniqueChipID === "1234567890123456789");
     check("实体反转义（&amp; 最后换）", isPlistDict(parsed) && parsed.Name === "Tom's &lt;Phone!", JSON.stringify(isPlistDict(parsed) ? parsed.Name : null));
-    check("date 读成字符串", isPlistDict(parsed) && parsed.When === "2026-01-02T03:04:05Z");
+    check(
+      "date 读成 Date",
+      isPlistDict(parsed) && parsed.When instanceof Date && parsed.When.getTime() === Date.parse("2026-01-02T03:04:05Z"),
+    );
     check("自闭合 <string/>", isPlistDict(parsed) && parsed.Empty === "");
     check(
       "带换行的 base64",
@@ -366,7 +453,8 @@ async function main() {
     ]);
     const client = await PlistServiceClient.open(fakeTunnel(connection), "com.example.shim.remote", 1234);
     const sent = sentMessages(connection);
-    check("先发 RSDCheckin", isPlistDict(sent[0]) && sent[0].Request === "RSDCheckin" && sent[0].ProtocolVersion === "2");
+    // 签到的内容现在由原生拼，这里能核的是顺序：业务请求之前先走完签到
+    check("签到在前，业务请求在后", isPlistDict(sent[0]) && sent[0].Request === "RSDCheckin");
     const reply = await client.request({ Label: "", Request: "GetValue" });
     check("跨小块拼帧读出回包", isPlistDict(reply.Value) && reply.Value.DeviceName === "测试机");
     const error = await rejects(client.request({ Label: "", Request: "GetValue", Key: "Nope" }));
@@ -384,7 +472,25 @@ async function main() {
     const big = new FakeConnection([frame({ Request: "RSDCheckin" }), frame({ Request: "StartService" })]);
     const bigClient = await PlistServiceClient.open(fakeTunnel(big), "x", 1);
     await bigClient.send({ pngData: new Uint8Array(50_000) });
-    check("大消息按 16384 切块写", big.written.every((chunk) => chunk.length <= 16384) && big.written.length > 3);
+    const bigSent = sentMessages(big);
+    check(
+      "大消息完整成一帧",
+      bigSent.length === 2 && isPlistDict(bigSent[1]) && (bigSent[1].pngData as Uint8Array).length === 50_000,
+    );
+
+    // 值在边界上的来回：Date 原样过去，PReal 退成数，null 直接拦住
+    const typed = new FakeConnection([frame({ Request: "RSDCheckin" }), frame({ Request: "StartService" })]);
+    const typedClient = await PlistServiceClient.open(fakeTunnel(typed), "x", 1);
+    const when = new Date("2026-10-18T03:45:07Z");
+    await typedClient.send({ iconModDate: when, scale: new PReal(2) });
+    const body = sentMessages(typed)[1];
+    const fields = isPlistDict(body) ? body : {};
+    check(
+      "日期写成 <date>，读回来还是同一时刻",
+      fields.iconModDate instanceof Date && fields.iconModDate.getTime() === when.getTime(),
+    );
+    check("PReal 退成普通数字", fields.scale === 2);
+    check("null 写不出去", (await rejects(typedClient.send({ a: null }))) instanceof Error);
   }
 
   console.log("服务解析");
@@ -1340,23 +1446,6 @@ async function main() {
       return { session, sent };
     }
 
-    check("键名校验：挡住空格和标点", isGestaltKey("ProductType") && isGestaltKey("Device-Supports_X") && !isGestaltKey("Product Type") && !isGestaltKey("1Bad") && !isGestaltKey(""));
-
-    const gestaltCall = serviceSession(() => ({
-      Status: "Success",
-      Diagnostics: { MobileGestalt: { ProductType: "iPhone16,2", MainScreenScale: 3, Status: "Success" } },
-    }));
-    const gestalt = await readMobileGestalt(gestaltCall.session, ["ProductType", "MainScreenScale", "NotAKey", "bad key"]);
-    check("请求格式照 idevice：MobileGestaltKeys", gestaltCall.sent[0].Request === "MobileGestalt" && Array.isArray(gestaltCall.sent[0].MobileGestaltKeys));
-    check("非法键名不发出去", (gestaltCall.sent[0].MobileGestaltKeys as string[]).join(",") === "ProductType,MainScreenScale,NotAKey");
-    check("取 Diagnostics.MobileGestalt，回包里的 Status 不算结果", gestalt.size === 2 && gestalt.get("ProductType") === "iPhone16,2" && !gestalt.has("Status"));
-    check("设备没给的键不出现", !gestalt.has("NotAKey"));
-    check("查完发 Goodbye", gestaltCall.sent.some((message) => message.Request === "Goodbye"));
-    const flatGestalt = serviceSession(() => ({ Status: "Success", Diagnostics: { ProductType: "iPhone16,2" } }));
-    check("个别系统直接放在 Diagnostics 下也认", (await readMobileGestalt(flatGestalt.session, ["ProductType"])).get("ProductType") === "iPhone16,2");
-    check("设备拒绝时抛错", (await rejects(readMobileGestalt(serviceSession(() => ({ Status: "Failure" })).session, ["ProductType"]))) instanceof Error);
-    check("没有合法键时不发请求", (await readMobileGestalt(serviceSession(() => ({})).session, ["bad key"])).size === 0);
-
     // 开发者磁盘镜像：先问 Personalized，没有再问 Developer
     const ddiCall = serviceSession((message) =>
       message.Command === "LookupImage"
@@ -1805,6 +1894,206 @@ async function main() {
     check("地址非法就退回默认", normalizeSettings({ host: "我不是地址" }).host === DEFAULT_HOST);
     check("地址合法就留着", normalizeSettings({ host: " 10.7.0.9 " }).host === "10.7.0.9");
     check("段超过 255 不算合法", normalizeHost("10.7.0.999") === DEFAULT_HOST);
+  }
+
+  console.log("设备服务表");
+  {
+    // RSD 通道的名字带 .shim.remote 后缀，老 lockdown 的不带，两种都要认得出来
+    check("带后缀的认得出来", classify("com.apple.springboardservices.shim.remote").kind === "used");
+    check("不带后缀的也认得出来", classify("com.apple.springboardservices").kind === "used");
+    check("本身就不带后缀的那个别被削", classify("com.apple.mobile.lockdown.remote.trusted").kind === "used");
+    check("去后缀只去末尾那一处", baseName("com.apple.a.shim.remote") === "com.apple.a");
+    check("没有后缀就原样返回", baseName("com.apple.a") === "com.apple.a");
+
+    check("认识但没用的归到 known", classify("com.apple.mobile.heartbeat.shim.remote").kind === "known");
+    check("没见过的归到 unknown，并且不编说法", classify("com.apple.something.new").kind === "unknown" && classify("com.apple.something.new").detail === "");
+    check("已用的要写清楚用在哪", classify("com.apple.misagent").detail.length > 0);
+
+    const services = new Map([
+      ["com.apple.springboardservices.shim.remote", 60001],
+      ["com.apple.mobile.heartbeat.shim.remote", 60002],
+      ["com.apple.zzz.unknown", 60003],
+    ]);
+    const rows = describeServices(services);
+    check("端口原样带上", rows.find((row) => row.port === 60003)?.name === "com.apple.zzz.unknown");
+    check("按名字排序", rows[0].name < rows[1].name && rows[1].name < rows[2].name);
+    check("三类各一个", new Set(rows.map((row) => row.kind)).size === 3);
+
+    const text = listText(rows);
+    check("复制出来的带端口", text.includes(":60003"));
+    check("三组都在", text.includes("已经用上的") && text.includes("没见过的"));
+    check("不认识的那条不带破折号说明", !text.includes("com.apple.zzz.unknown  :60003  ——"));
+  }
+
+  console.log("配置描述文件");
+  {
+    // 照真机回包的形状：OrderedIdentifiers 定顺序，manifest 和 metadata 各管一半
+    const reply = {
+      OrderedIdentifiers: ["com.nssurge.surge-ios.ca.profile.X", "abc123", "没有元数据的那个"],
+      ProfileManifest: {
+        "com.nssurge.surge-ios.ca.profile.X": { Description: "Surge Generated CA 12E05E65", IsActive: true },
+        abc123: { Description: "ONE 轻量版", IsActive: false },
+        没有元数据的那个: { Description: "只有 manifest", IsActive: true },
+      },
+      ProfileMetadata: {
+        "com.nssurge.surge-ios.ca.profile.X": {
+          PayloadDisplayName: "Surge Generated CA 12E05E65",
+          PayloadUUID: "4EBA9C8B",
+          PayloadRemovalDisallowed: false,
+        },
+        abc123: {
+          PayloadDisplayName: "ONE轻量版",
+          PayloadDescription: "请点击右上角「安装」按钮",
+          PayloadOrganization: "某平台",
+          PayloadRemovalDisallowed: true,
+        },
+      },
+      Status: "Acknowledged",
+    };
+
+    const profiles = parseProfiles(reply);
+    check("按 OrderedIdentifiers 的顺序来", profiles.map((p) => p.identifier).join() === "com.nssurge.surge-ios.ca.profile.X,abc123,没有元数据的那个");
+    check("名字优先取 metadata 的", profiles[1].name === "ONE轻量版");
+    check("没有 metadata 就退回 manifest 的说明", profiles[2].name === "只有 manifest");
+    check("生效状态读得对", profiles[0].active && !profiles[1].active);
+    check("不可删除标出来", !profiles[0].locked && profiles[1].locked);
+    check("安装说明原样留着", profiles[1].description.includes("右上角"));
+    check("缺的字段给空串，不是 undefined", profiles[0].organization === "" && profiles[2].uuid === "");
+
+    check("回包不是字典时给空列表", parseProfiles(null).length === 0 && parseProfiles("x").length === 0);
+    check("没有 OrderedIdentifiers 时退回 manifest 的键", parseProfiles({ ProfileManifest: { a: { Description: "A" } } }).length === 1);
+    check("一份都没装也不炸", parseProfiles({ OrderedIdentifiers: [], Status: "Acknowledged" }).length === 0);
+
+    check("代理证书分到一类", classifyProfile(profiles[0]) === "proxyCa");
+    check("认不出来的归其他，不硬猜", classifyProfile(profiles[2]) === "other");
+    check("复制出来的带名字和状态", profilesText(profiles).includes("Surge Generated CA") && profilesText(profiles).includes("未生效"));
+    check("版本号读出来，删的时候要原样带回去", profiles[0].version === 1 && profiles[2].version === 1);
+
+    // 删：标了不许删的要在发请求之前就拦下，别等设备拒绝
+    const locked = profiles[1];
+    const refused = await removeConfigProfile(null as never, locked).catch((error: unknown) => error);
+    check("不许删的直接拦下，不发请求", refused instanceof Error && refused.message.includes("不允许删除"));
+  }
+
+  console.log("设备树里的 ASCII 字段");
+  {
+    const bytes = (...values: number[]) => Uint8Array.from(values);
+    const ascii = (text: string, pad = 0) => {
+      const body = [...text].map((char) => char.charCodeAt(0));
+      return Uint8Array.from([...body, ...new Array(pad).fill(0)]);
+    };
+
+    // 真机 IORegistry 里的原样数据：定长字段塞一段 NUL 结尾的 ASCII，后面补 0
+    check("NUL 结尾的串还原成文本", printableText(ascii("iPhone18,2", 1)) === "iPhone18,2");
+    check("补了一长串 0 也还原", printableText(ascii("MG074", 27)) === "MG074");
+    check("带斜杠的照样认", printableText(ascii("CH/A", 28)) === "CH/A");
+    check("几段串拼在一起用空格分开", printableText(ascii("V54AP\0iPhone18,2\0AppleARM", 1)) === "V54AP iPhone18,2 AppleARM");
+    check("不带结尾 0 的也认", printableText(ascii("t8150")) === "t8150");
+
+    // 从严：宁可退回十六进制，也不要把二进制瞎解成乱码
+    check("含不可打印字节的退回 null", printableText(bytes(0x01, 0x02, 0x03)) === null);
+    check("高位字节（非 ASCII）退回 null", printableText(bytes(0x48, 0x49, 0xff)) === null);
+    check("全是 0 的退回 null", printableText(bytes(0, 0, 0, 0)) === null);
+    check("空的退回 null", printableText(bytes()) === null);
+
+    check("formatValue 用上了它", formatValue(ascii("iPhone18,2", 1)) === "iPhone18,2");
+    check("解不出文本时还是十六进制", formatValue(bytes(0x01, 0x02)) === "0102");
+  }
+
+  console.log("硬件规格：解码规则");
+  {
+    // 这几条规则必须对任何设备都成立，不是某台机器的特例
+    check("16.16 定点：65536 就是 1.0", fixed16(65536) === 1);
+    check("16.16 定点：半格", fixed16(32768) === 0.5);
+    check("峰值亮度那个数解出 650", Math.round(fixed16(42598400)) === 650);
+
+    check("小端字节转整数", leNumber(Uint8Array.from([0x00, 0x36, 0x6e, 0x01])) === 24000000);
+    check("单字节也行", leNumber(Uint8Array.from([0xff])) === 255);
+    check("空的和超长的返回 null", leNumber(Uint8Array.from([])) === null && leNumber(new Uint8Array(9)) === null);
+
+    // 时基从设备读，不写死——换台机器时基不同，写死就全错
+    const clock = 24000000;
+    check("mach 间隔换赫兹：16.666ms → 60Hz", Math.round(machToHz(399984, clock)!) === 60);
+    check("mach 间隔换赫兹：41.666ms → 24Hz", Math.round(machToHz(999984, clock)!) === 24);
+    check("间隔或时基为 0 时返回 null", machToHz(0, clock) === null && machToHz(100, 0) === null);
+
+    check("核心掩码 63 是 6 核", countBits(63) === 6);
+    check("掩码 255 是 8 核", countBits(255) === 8);
+    check("掩码 0 是 0 核", countBits(0) === 0);
+  }
+
+  console.log("硬件规格：缺字段就不显示");
+  {
+    // 真机那台的数据，原样喂进去看拼不拼得对
+    const real = buildSpec({
+      platform: {
+        "platform-name": "t8150",
+        "model-number": "MG074",
+        "region-info": "CH/A",
+        "clock-frequency": Uint8Array.from([0x00, 0x36, 0x6e, 0x01]),
+      },
+      gpu: { GPUConfigurationVariable: { num_cores: 6, gpu_gen: 18, gpu_var: "P" }, IOClass: "AGXAcceleratorG18P" },
+      display: {
+        IOMFBDisplayRefresh: { displayMinRefreshIntervalMachTime: 399984, displayMaxRefreshIntervalMachTime: 999984 },
+        IOMFBBrightnessLevel: 65536,
+        IOMFBIndicatorNitsCap: 42598400,
+      },
+      media: { Size: 512000000000, "Preferred Block Size": 4096 },
+      lockdown: { ProductType: "iPhone18,2", CPUArchitecture: "arm64e", ProductVersion: "27.2" },
+    });
+    const flat = specText(real);
+    check("GPU 三段拼成一行", flat.includes("第 18 代 · P 型 · 6 核"));
+    check("刷新率按设备自己的时基算", flat.includes("24–60 Hz 自适应"));
+    check("亮度是百分比", flat.includes("100%"));
+    check("峰值亮度换成 nits", flat.includes("650 nits"));
+    check("容量换成 GB", flat.includes("512 GB"));
+    check("机型从 lockdown 取", flat.includes("iPhone18,2"));
+
+    // 换一台什么都查不到的设备：该消失的要消失，不能留一堆「未知」
+    const empty = buildSpec({});
+    check("什么都没有时一节都不剩", empty.length === 0, String(empty.length));
+    check("空规格的文本也是空的", specText(empty).trim() === "");
+
+    // 只有部分节点：有的那节出现，没的那节整节消失
+    const partial = buildSpec({ lockdown: { ProductType: "iPhone99,1" } });
+    check("只有机型时只出一节", partial.length === 1 && partial[0].title === "机型");
+    check("不给缺的字段编默认值", !specText(partial).includes("未知") && !specText(partial).includes("—"));
+
+    // 时基读不到就不显示刷新率，而不是按猜的时基算
+    const noClock = buildSpec({
+      display: { IOMFBDisplayRefresh: { displayMinRefreshIntervalMachTime: 399984, displayMaxRefreshIntervalMachTime: 999984 } },
+    });
+    check("没有时基就不显示刷新率", !specText(noClock).includes("Hz"));
+  }
+
+  console.log("硬件树");
+  {
+    check("类名查出 EntryClass", queryText({ label: "x", entryClass: "IOPMPowerSource" }) === "EntryClass=IOPMPowerSource");
+    check("节点名查出 EntryName", queryText({ label: "x", entryName: "AppleSmartBattery" }) === "EntryName=AppleSmartBattery");
+    check("两个都给时以类名为准", queryText({ label: "x", entryClass: "A", entryName: "B" }) === "EntryClass=A");
+
+    check("正常的 IOKit 类名放行", ["IOPMPowerSource", "AppleH13CameraInterface", "IO80211Interface", "A1"].every(isRegistryKey));
+    check("数字开头拦下", !isRegistryKey("2Apple"));
+    check("带点、空格、连字符的拦下", !["Apple.Foo", "Apple Foo", "Apple-Foo"].some(isRegistryKey));
+    check("空的拦下", !isRegistryKey(""));
+    check("太长的拦下", !isRegistryKey("A".repeat(65)) && isRegistryKey("A".repeat(64)));
+
+    // 第一组是真机验过确实存在的，第二组是没命中、换个叫法再试的
+    check("分组按把握程度排", IO_PRESETS.length === 2);
+    check("最后一组改用节点名试", IO_PRESETS[1].entries.every((e) => e.entryName && !e.entryClass));
+    check("验过的那组排在最前", IO_PRESETS[0].title.includes("验过"));
+    check("每组都有条目", IO_PRESETS.every((group) => group.entries.length > 0));
+    check("每条都指明了类名或节点名", IO_PRESETS.every((g) => g.entries.every((e) => e.entryClass || e.entryName)));
+    const keys = IO_PRESETS.flatMap((group) => group.entries.map(queryText));
+    check("预设之间不重复", new Set(keys).size === keys.length);
+
+    const results = [
+      { query: { label: "电池", entryClass: "IOPMPowerSource" }, rows: [["A", "1"]] as [string, string][], missing: false, error: "" },
+      { query: { label: "没有的", entryClass: "Nope" }, rows: [] as [string, string][], missing: true, error: "" },
+    ];
+    const text = resultsText(results);
+    check("只列有内容的", text.includes("电池") && text.includes("A = 1"));
+    check("没查到的单独归一行，不混在里面", text.includes("没有这些节点：没有的"));
   }
 
   console.log("调试日志");

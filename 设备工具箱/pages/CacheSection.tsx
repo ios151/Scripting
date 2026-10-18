@@ -3,9 +3,10 @@
 // 只清「重算得出来」的东西（图标、占用空间统计）。配对记录、连接设置、
 // 主屏备份都不在这儿——那些丢了要重新配或者再也找不回来，不是缓存。
 
-import { Button, HStack, ProgressView, Section, Spacer, Text, useEffect, useState } from "scripting";
+import { Button, HStack, ProgressView, Spacer, Text, useEffect, useState } from "scripting";
 import { describeError } from "../core/debug";
 import { cacheSizeText, cacheSummary, clearAllCaches, type CacheEntry } from "../kit/cache";
+import { FoldableSection, SectionLabel } from "./common";
 
 export function CacheSection() {
   const [entries, setEntries] = useState<CacheEntry[] | null>(null);
@@ -49,8 +50,9 @@ export function CacheSection() {
   const empty = entries !== null && entries.every((entry) => (entry.bytes ?? 0) === 0 && entry.detail === "没有缓存");
 
   return (
-    <Section
-      header={<Text>缓存</Text>}
+    <FoldableSection
+      id="cache"
+      label={<SectionLabel title="缓存" note={entries !== null && !empty ? cacheSizeText(entries) : undefined} />}
       footer={
         <Text foregroundStyle={message.startsWith("清不掉") || message.startsWith("读不到") ? "systemRed" : "tertiaryLabel"}>
           {message || "图标和占用空间会存下来，下次打开直接用，不用每次重读。清掉之后会重新从设备取。"}
@@ -87,6 +89,6 @@ export function CacheSection() {
           action={() => void clear()}
         />
       )}
-    </Section>
+    </FoldableSection>
   );
 }

@@ -20,7 +20,8 @@ import {
 import { readAppDetail, readApps, type AppEntry } from "../kit/apps";
 import { readImageStatus } from "../kit/imageMounter";
 import { expiryState, readProfiles, type ProfileEntry } from "../kit/profiles";
-import { readDeviceUdid, readMobileGestalt } from "../kit/services";
+import { marketingName, readDeviceUdid, readDeviceValues } from "../kit/services";
+import type { PlistDict } from "../kit/plist";
 import {
   diagnose,
   groupBySigner,
@@ -128,10 +129,21 @@ export function SignCheckPage() {
     log("读取设备环境…");
     const udid = await readDeviceUdid(session).catch(() => null);
     const image = await readImageStatus(session).catch(() => ({ mounted: null, signatureBytes: null, developerMode: null }));
-    const gestalt = await readMobileGestalt(session, ["ProductType", "ProductVersion", "BuildVersion"]).catch(
-      () => new Map<string, string>(),
-    );
-    const deviceLine = `设备：${gestalt.get("ProductType") ?? "未知机型"} · iOS ${gestalt.get("ProductVersion") ?? "?"}（${gestalt.get("BuildVersion") ?? "?"}）`;
+    /*
+      机型和系统版本走 lockdown 的 GetValue。
+      原先走 MobileGestalt，iOS 27 起那条路被系统停了，这一行一直是「未知机型」。
+    */
+    const values = await readDeviceValues(session).catch(() => ({}) as PlistDict);
+    const text = (key: string) => (typeof values[key] === "string" ? (values[key] as string) : null);
+    /*
+      机型显示成「市售名（标识）」。诊断报告是给人看的，光一个 iPhone18,2 认不出是哪台；
+      标识也得留着——描述文件、设备列表那些地方用的是它。表里查不到的新机型，
+      `marketingName` 原样返回标识，这时候只显示一次，不写成「iPhone19,1（iPhone19,1）」。
+    */
+    const productType = text("ProductType");
+    const named = marketingName(productType);
+    const model = !named ? "未知机型" : named === productType ? named : `${named}（${productType}）`;
+    const deviceLine = `设备：${model} · iOS ${text("ProductVersion") ?? "?"}（${text("BuildVersion") ?? "?"}）`;
     return {
       // App Store 和 TestFlight 的包由 Apple 重签，不吃设备上的描述文件，不用查
       apps: all.filter((app) => app.source !== "appStore" && app.source !== "testFlight"),
