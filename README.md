@@ -14,7 +14,10 @@
 | **[设备工具箱](docs/设备工具箱.md)** | 走同一条开发者通道管本机：设备信息、电池健康、主屏布局、应用管理、配置描述文件、签名诊断、实时性能、硬件规格、通话录音提示音 | 2.1.1 | iOS 27+ · TestFlight 版 Scripting · 开发者模式 | [⬇️ 一键安装](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FDeviceToolbox.zip%22%5D) |
 
 每个脚本的详细说明、已知限制、更新记录点进「脚本」那一列。
-历史版本和更新日志在 [Releases](https://github.com/ios151/Scripting/releases)。
+
+**WLOC 虚拟定位**的历史版本在 [Releases](https://github.com/ios151/Scripting/releases)。
+**设备工具箱不发 Release** —— 上面那个一键安装链接指向 `main` 上的 `dist/DeviceToolbox.zip`，
+点进去装到的始终是最新版；想看改了什么翻提交记录。
 
 > ### ⚠️ 必须是 TestFlight 版的 Scripting
 >
