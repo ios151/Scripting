@@ -124,11 +124,14 @@ export function formatBytes(bytes: number): string {
  * `iPhone18,2` 是 iPhone 17 Pro Max。小数点后那位也不按档次排
  * （`iPhone17,1` 是 Pro、`iPhone17,3` 才是标准版）。
  *
- * **只收已经发售的**。传闻中的下一代（`iPhone19,x`）在社区列表里早就有了，但名字还会变，
- * 收进来就是在界面上写一个可能错的型号——查不到的本来就会原样显示标识，不亏。
+ * **只收已经发售的**，没发售的不收——查不到的本来就会原样显示标识，不亏。
  *
- * 收到 iPhone18,x（2025 年秋，iPhone 17 系列 + Air）。数据对过两处：adamawolf 那份
- * 机型列表 gist 和 EveryMac，两边一致。
+ * 收到 **iPhone19,x**（2026 年 9 月发售的 iPhone 18 Pro / Pro Max / Duo）。
+ * 数据对过三处：Xcode 27.1 beta 的标识表、EveryMac、Wikipedia。
+ *
+ * **补表时先确认今年的发布季过了没有**：2026-10 这次就栽在这儿——当时按「iPhone19,x 还是
+ * 传闻」把它们漏了，其实 iPhone 18 早在一个月前就上市了。社区列表（adamawolf 那份 gist）
+ * 会把未发布的型号一起列出来，光看它分不出发没发售，要另外找发售日期佐证。
  */
 const MARKETING_NAMES: Record<string, string> = {
   "iPhone10,1": "iPhone 8", "iPhone10,4": "iPhone 8", "iPhone10,2": "iPhone 8 Plus", "iPhone10,5": "iPhone 8 Plus",
@@ -144,6 +147,9 @@ const MARKETING_NAMES: Record<string, string> = {
   "iPhone17,5": "iPhone 16e",
   "iPhone18,1": "iPhone 17 Pro", "iPhone18,2": "iPhone 17 Pro Max", "iPhone18,3": "iPhone 17",
   "iPhone18,4": "iPhone Air", "iPhone18,5": "iPhone 17e",
+  // iPhone 18 Pro Max 有**两个标识**：19,3 是美版、19,7 是国际版，同一台机器。
+  "iPhone19,2": "iPhone 18 Pro", "iPhone19,3": "iPhone 18 Pro Max", "iPhone19,7": "iPhone 18 Pro Max",
+  "iPhone19,4": "iPhone Duo",
 };
 
 /**
