@@ -115,7 +115,7 @@
 ### 社区推荐服务
 
 原作者的「网友推荐」上传服务已经失效（2026-10-22 实测：脚本里写 GitLab 用的令牌过期，上传一律失败），而且只有他一个人能维护。
-为此另做了一个服务端：**javbus-community**（Hono + Cloudflare Worker + D1，自带管理后台；服务端代码在作者的私有仓库里，暂不公开），一群人一起维护推荐列表：后台审核、举报处理、定时自动检查封面和链接还在不在、多账号分角色。
+为此另做了一个服务端：**javbus-community**（Hono + Cloudflare Worker + D1，自带管理后台，[源码、部署和维护方法在 ios151/javbus-community](https://github.com/ios151/javbus-community)），一群人一起维护推荐列表：后台审核、举报处理、定时自动检查封面和链接还在不在、多账号分角色。
 
 脚本出厂就接好了它（`core/constants.ts` 的 `COMMUNITY_URL` = `https://javbus-community.javbuss.workers.dev`），而且**只接管网友推荐**：
 作者精选原作者还在更新（2026-10-23 下载到的最新一条是 10-19 推的），照旧读他的列表、用他的上传服务。
@@ -524,7 +524,7 @@ npx -y -p typescript@5.7 tsc --noEmit -p tsconfig.json
 ```
 
 另有一个端到端脚本，把脚本里真实的 `kit/recommend.ts` 对着本地起的 javbus-community（`wrangler dev`）跑一遍
-（提交 / 重复 / 设备自助撤销 / 口令撤销 / 作者精选不走社区 / 举报自动隐藏 / 待审 / 维护模式 / 限频）；它要服务端的代码（未公开），所以没有放进本仓库。
+（提交 / 重复 / 设备自助撤销 / 口令撤销 / 作者精选不走社区 / 举报自动隐藏 / 待审 / 维护模式 / 限频）；它要先把服务端起来（见 [javbus-community](https://github.com/ios151/javbus-community)），所以没有放进本仓库。
 
 类型检查要先把 Scripting 的 `dts/` 复制到仓库根（见仓库 README 的「开发」）。
 解析器写完后另外对着 Wayback 存档的真实页面（javbus.com 无码列表 30 条、演员列表 50 位、分类页 8 个小节、
