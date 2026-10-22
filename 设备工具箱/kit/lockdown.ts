@@ -9,8 +9,10 @@
 //  - `<date>` 原生解成 Date 对象。老路子上 XML 的日期是 ISO 字符串、二进制 plist 的
 //    日期是 PReal（毫秒数），写回时都会退化成别的类型；现在原样是日期，写回也还是
 //    `<date>`，主屏布局的 iconModDate 因此反而更准（见 kit/layoutCheck.ts 开头第 1 条）。
-//  - 超过 2^53 的整数原生只能给 number，精度会掉（老路子读成十进制字符串保住了）。
-//    眼下只有 ECID 这一个字段真的会超，已改从 RSD 握手属性取（那边是 bigint）。
+//  - 超过 2^53 的整数：旧版原生只能给 number，精度会掉（老路子读成十进制字符串保住了）；
+//    新版类型定义写明这种整数给 bigint。`receive` 统一转成十进制字符串（见 `fromNative`），
+//    和裸帧那条路一致，上层的 asNumber / asSigned64 / ECID 解析本来就认字符串。
+//    ECID 仍优先从 RSD 握手属性取（那边是 bigint），不依赖这里。
 //
 // 适用于 RSD 服务表里名字带 `.shim.remote` 的那些，以及
 // `com.apple.mobile.lockdown.remote.trusted`。
@@ -58,6 +60,39 @@ function toNative(value: PlistValue): DeviceServices.PlistValue {
       out[key] = next;
     }
     return changed ? out : (value as unknown as DeviceServices.PlistValue);
+  }
+  return value;
+}
+
+/**
+ * `DeviceServices` 的回包 → 我们的 PlistValue。
+ *
+ * 新版类型定义写明：超出安全整数范围的 `<integer>` 读成 bigint。我们的 PlistValue 里没有 bigint，
+ * 这里统一转成十进制字符串——和裸帧那条路（kit/plist.ts 的 XML 解码）一致，两个后端给上层的是同一种东西。
+ * 上层本来就认：asNumber 认数字字符串，asSigned64 要的正是无符号补码的十进制字符串
+ * （电流 -350 mA 在 IORegistry 里是 18446744073709551266，经 number 就丢精度、变成 0）。
+ * 其余类型原样；没有 bigint 的子树原样返回，不把整份主屏布局拷一遍。
+ */
+export function fromNative(value: DeviceServices.PlistValue): PlistValue {
+  if (typeof value === "bigint") return value.toString();
+  if (Array.isArray(value)) {
+    let changed = false;
+    const items = value.map((item) => {
+      const next = fromNative(item);
+      if (next !== (item as unknown)) changed = true;
+      return next;
+    });
+    return changed ? items : (value as unknown as PlistValue);
+  }
+  if (typeof value === "object" && !(value instanceof Date) && !(value instanceof Uint8Array)) {
+    let changed = false;
+    const out: { [key: string]: PlistValue } = {};
+    for (const [key, item] of Object.entries(value)) {
+      const next = fromNative(item);
+      if (next !== (item as unknown)) changed = true;
+      out[key] = next;
+    }
+    return changed ? out : (value as unknown as PlistValue);
   }
   return value;
 }
@@ -298,7 +333,7 @@ export class PlistServiceClient extends BasePlistClient {
     const elapsed = Date.now() - started;
     // 壁纸、misagent 这类大包记一下耗时：卡在这里的话日志上看得见。
     if (elapsed >= SLOW_REPLY) debugLog("shim", `${this.serviceName} 回包用了 ${elapsed} ms`);
-    return value;
+    return fromNative(value);
   }
 
   async close(): Promise<void> {

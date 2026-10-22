@@ -3,10 +3,10 @@
 //
 // 样本一律虚构：序列号、UDID、ECID 都是一眼看得出是编的那种。
 
-import { encodeBplist, PReal } from "../scripts/设备工具箱/core/bplist";
-import { utf8 } from "../scripts/设备工具箱/core/bytes";
-import { PlistServiceClient, LockdownServiceError } from "../scripts/设备工具箱/kit/lockdown";
-import { decodePlist, decodeXmlPlist, encodeXmlPlist, isPlistDict } from "../scripts/设备工具箱/kit/plist";
+import { encodeBplist, PReal } from "../设备工具箱/core/bplist";
+import { utf8 } from "../设备工具箱/core/bytes";
+import { PlistServiceClient, LockdownServiceError, fromNative } from "../设备工具箱/kit/lockdown";
+import { decodePlist, decodeXmlPlist, encodeXmlPlist, isPlistDict } from "../设备工具箱/kit/plist";
 import {
   collectBundleIds,
   parseBattery,
@@ -14,15 +14,15 @@ import {
   readDeviceInfo,
   readHomeLayout,
   readIcons,
-} from "../scripts/设备工具箱/kit/services";
-import { isTunnelDropped, type DeviceSession } from "../scripts/设备工具箱/kit/session";
-import { clearDebugLog, debugEcho, debugLog, debugLogCount, debugLogText } from "../scripts/设备工具箱/core/debug";
-import { baseName, classify, describeServices, listText } from "../scripts/设备工具箱/kit/serviceList";
-import { IO_PRESETS, isRegistryKey, queryText, resultsText } from "../scripts/设备工具箱/kit/ioregistry";
-import { buildSpec, countBits, fixed16, leNumber, machToHz, specText } from "../scripts/设备工具箱/kit/hardwareSpec";
-import { classifyProfile, parseProfiles, profilesText, removeConfigProfile } from "../scripts/设备工具箱/kit/configProfiles";
-import { DEFAULT_HOST, normalizeHost, normalizeSettings } from "../scripts/设备工具箱/kit/settings";
-import { LINK_LABEL, classifyLink, linkHint, needsAttention, type LinkKind } from "../scripts/设备工具箱/kit/network";
+} from "../设备工具箱/kit/services";
+import { isTunnelDropped, type DeviceSession } from "../设备工具箱/kit/session";
+import { clearDebugLog, debugEcho, debugLog, debugLogCount, debugLogText } from "../设备工具箱/core/debug";
+import { baseName, classify, describeServices, listText } from "../设备工具箱/kit/serviceList";
+import { IO_PRESETS, isRegistryKey, queryText, resultsText } from "../设备工具箱/kit/ioregistry";
+import { buildSpec, countBits, fixed16, leNumber, machToHz, specText } from "../设备工具箱/kit/hardwareSpec";
+import { classifyProfile, parseProfiles, profilesText, removeConfigProfile } from "../设备工具箱/kit/configProfiles";
+import { DEFAULT_HOST, normalizeHost, normalizeSettings } from "../设备工具箱/kit/settings";
+import { LINK_LABEL, classifyLink, linkHint, needsAttention, type LinkKind } from "../设备工具箱/kit/network";
 import {
   allKeys,
   arrangementKey,
@@ -32,9 +32,9 @@ import {
   dockToPage,
   moveInDock,
   withWidgetIdentifiers,
-} from "../scripts/设备工具箱/kit/homeEdit";
-import { applyPlan, collectFolderApps, collectLooseApps, colorFolderLayout, dissolveFolders, reorderLooseApps, sanitizePlan, sortLooseApps } from "../scripts/设备工具箱/kit/homeOrganize";
-import { COLOR_BUCKETS, colorBucket, colorKey, compareColorKeys } from "../scripts/设备工具箱/kit/colorSort";
+} from "../设备工具箱/kit/homeEdit";
+import { applyPlan, collectFolderApps, collectLooseApps, colorFolderLayout, dissolveFolders, reorderLooseApps, sanitizePlan, sortLooseApps } from "../设备工具箱/kit/homeOrganize";
+import { COLOR_BUCKETS, colorBucket, colorKey, compareColorKeys } from "../设备工具箱/kit/colorSort";
 import {
   askOrganizer,
   extractJson,
@@ -54,8 +54,8 @@ import {
   saveStylePrompt,
   transientReason,
   STYLE_PROMPT_LIMIT,
-} from "../scripts/设备工具箱/kit/aiOrganize";
-import type { PlistValue } from "../scripts/设备工具箱/core/bplist";
+} from "../设备工具箱/kit/aiOrganize";
+import type { PlistValue } from "../设备工具箱/core/bplist";
 import {
   appListText,
   classifyApp,
@@ -74,7 +74,7 @@ import {
   withSizes,
   type AppEntry,
   type AppSizes,
-} from "../scripts/设备工具箱/kit/apps";
+} from "../设备工具箱/kit/apps";
 import {
   DEFAULT_ROW_ACTIONS,
   ROW_ACTIONS,
@@ -84,7 +84,7 @@ import {
   sanitizeRowActions,
   toggleRowAction,
   type RowActionId,
-} from "../scripts/设备工具箱/kit/rowActions";
+} from "../设备工具箱/kit/rowActions";
 import {
   appsForProfile,
   expiryState,
@@ -93,11 +93,11 @@ import {
   readProfiles,
   removeProfile,
   sortProfiles,
-} from "../scripts/设备工具箱/kit/profiles";
-import { flattenSorted, formatBytes, formatValue, powerAction, printableText } from "../scripts/设备工具箱/kit/services";
-import { readImageStatus } from "../scripts/设备工具箱/kit/imageMounter";
-import { inferPageSize, memoryBreakdown, parseSample } from "../scripts/设备工具箱/kit/sysmon";
-import { EVENT_GROUPS, EVENT_KINDS, describeEvent, watchEvents } from "../scripts/设备工具箱/kit/notifications";
+} from "../设备工具箱/kit/profiles";
+import { flattenSorted, formatBytes, formatValue, powerAction, printableText } from "../设备工具箱/kit/services";
+import { readImageStatus } from "../设备工具箱/kit/imageMounter";
+import { inferPageSize, memoryBreakdown, parseSample } from "../设备工具箱/kit/sysmon";
+import { EVENT_GROUPS, EVENT_KINDS, describeEvent, watchEvents } from "../设备工具箱/kit/notifications";
 import {
   appIdMatches,
   diagnose,
@@ -108,13 +108,13 @@ import {
   subjectOf,
   summarize,
   type DeviceEnv,
-} from "../scripts/设备工具箱/kit/signCheck";
-import { earliestCertificate, type ProfileEntry } from "../scripts/设备工具箱/kit/profiles";
-import { parseCertTime, parseCertificate } from "../scripts/设备工具箱/kit/x509";
-import { clockLabel, clockOffsetDays, isClockShifted, resetClock, shiftClock, simulatedNow } from "../scripts/设备工具箱/kit/testClock";
-import { entitlementsOf, readAppDetail, urlSchemes } from "../scripts/设备工具箱/kit/apps";
-import { deviceHub } from "../scripts/设备工具箱/kit/hub";
-import { cacheSizeText, totalCacheBytes } from "../scripts/设备工具箱/kit/cache";
+} from "../设备工具箱/kit/signCheck";
+import { earliestCertificate, type ProfileEntry } from "../设备工具箱/kit/profiles";
+import { parseCertTime, parseCertificate } from "../设备工具箱/kit/x509";
+import { clockLabel, clockOffsetDays, isClockShifted, resetClock, shiftClock, simulatedNow } from "../设备工具箱/kit/testClock";
+import { entitlementsOf, readAppDetail, urlSchemes } from "../设备工具箱/kit/apps";
+import { deviceHub } from "../设备工具箱/kit/hub";
+import { cacheSizeText, totalCacheBytes } from "../设备工具箱/kit/cache";
 import {
   clearStoreLinkCache,
   countriesFor,
@@ -123,7 +123,7 @@ import {
   lookupUrl,
   parseLookup,
   shareText,
-} from "../scripts/设备工具箱/kit/appStore";
+} from "../设备工具箱/kit/appStore";
 import {
   CURVE_LIMIT,
   appendSample,
@@ -133,7 +133,7 @@ import {
   formatMetric,
   formatSpan,
   type CurveSample,
-} from "../scripts/设备工具箱/kit/batteryCurve";
+} from "../设备工具箱/kit/batteryCurve";
 import {
   HISTORY_LIMIT,
   cardState,
@@ -143,10 +143,10 @@ import {
   shouldEndOnUnplug,
   sparkHeights,
   statusText,
-} from "../scripts/设备工具箱/kit/batteryCard";
-import type { BatteryReport } from "../scripts/设备工具箱/kit/services";
-import { suspiciousValues, widgetDiff, widgetEntries } from "../scripts/设备工具箱/kit/layoutCheck";
-import { PReal } from "../scripts/设备工具箱/core/bplist";
+} from "../设备工具箱/kit/batteryCard";
+import type { BatteryReport } from "../设备工具箱/kit/services";
+import { suspiciousValues, widgetDiff, widgetEntries } from "../设备工具箱/kit/layoutCheck";
+import { PReal } from "../设备工具箱/core/bplist";
 
 let passed = 0;
 let failed = 0;
@@ -491,6 +491,47 @@ async function main() {
     );
     check("PReal 退成普通数字", fields.scale === 2);
     check("null 写不出去", (await rejects(typedClient.send({ a: null }))) instanceof Error);
+  }
+
+  console.log("原生回包里的大整数");
+  {
+    // 新版类型定义：超出安全范围的 <integer> 原生给 bigint。我们的 PlistValue 没有 bigint，
+    // 收包时统一转成十进制字符串（和裸帧那条路一致），上层才不会在两个后端上看到两种类型。
+    const huge = BigInt("18446744073709551266"); // -350 mA 的无符号补码，IORegistry 里电流就长这样
+    const when = new Date("2026-10-18T03:45:07Z");
+    const blob = new Uint8Array([1, 2, 3]);
+    const plain = { A: 1, B: [2, 3] };
+    const tree = { Current: huge, Count: 7, Name: "x", When: when, Blob: blob, List: [1, huge, { Deep: huge }], Same: plain };
+    const converted = fromNative(tree);
+    const out = isPlistDict(converted) ? converted : {};
+    check("bigint 转成十进制字符串，精度不丢", out.Current === "18446744073709551266");
+    check(
+      "嵌在数组和字典里的 bigint 也转",
+      Array.isArray(out.List) && out.List[1] === "18446744073709551266" && isPlistDict(out.List[2]) && out.List[2].Deep === "18446744073709551266",
+    );
+    check("其它类型原样：数字、字符串、日期、二进制", out.Count === 7 && out.Name === "x" && out.When === when && out.Blob === blob);
+    check("没有 bigint 的子树原样返回，不拷贝", out.Same === plain);
+    check("没有 bigint 的整棵树原样返回", fromNative(plain) === plain);
+
+    // 走一遍真实的收包：把第三条回包换成带 bigint 的树，经 receive() 出来
+    const native = (globalThis as unknown as { DeviceServices: { adopt: (source: object, options?: { maximumFrameBytes?: number }) => FakePlistConnection } }).DeviceServices;
+    const realAdopt = native.adopt;
+    native.adopt = (source, options) => {
+      const connection = realAdopt(source, options);
+      const realRead = connection.readPlist.bind(connection);
+      let reads = 0;
+      connection.readPlist = async () => (++reads <= 2 ? realRead() : ({ Current: huge, Count: 7 } as unknown as PlistValue));
+      return connection;
+    };
+    try {
+      const bigConn = new FakeConnection([frame({ Request: "RSDCheckin" }), frame({ Request: "StartService" })]);
+      const bigReader = await PlistServiceClient.open(fakeTunnel(bigConn), "x", 1);
+      const got = await bigReader.receive();
+      check("receive() 把原生给的 bigint 转成字符串", isPlistDict(got) && got.Current === "18446744073709551266" && got.Count === 7);
+      await bigReader.close();
+    } finally {
+      native.adopt = realAdopt;
+    }
   }
 
   console.log("服务解析");
