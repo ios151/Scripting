@@ -12,12 +12,14 @@
 |---|---|---|---|---|
 | **[WLOC 虚拟定位](docs/WLOC.md)** | 用苹果官方开发者接口模拟本机定位，与 Xcode 的 Simulate Location 同一套机制 | 2.7.5 | iOS 27+ · Scripting 3.3.0+ · 开发者模式 | [⬇️ 一键安装](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FWLOC.zip%22%5D) |
 | **[设备工具箱](docs/设备工具箱.md)** | 走同一条开发者通道管本机：设备信息、电池健康、主屏布局、应用管理、配置描述文件、签名诊断、实时性能、硬件规格、通话录音提示音 | 2.1.1 | iOS 27+ · TestFlight 版 Scripting · 开发者模式 | [⬇️ 一键安装](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FDeviceToolbox.zip%22%5D) |
+| **[JavBus](docs/JavBus.md)** | JavBus 非官方客户端（移植自 JSBox 脚本 JavBus 9.2）：检索、女优与分类、收藏、磁链、预览与字幕、推荐（网友推荐走社区推荐服务）。含成人内容 | 1.0.0 | Scripting 3.3.0+ · 能访问 javbus.com · 18+ | [⬇️ 一键安装](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FJavBus.zip%22%5D) |
 
 每个脚本的详细说明、已知限制、更新记录点进「脚本」那一列。
 
 **WLOC 虚拟定位**的历史版本在 [Releases](https://github.com/ios151/Scripting/releases)。
 **设备工具箱不发 Release** —— 上面那个一键安装链接指向 `main` 上的 `dist/DeviceToolbox.zip`，
 点进去装到的始终是最新版；想看改了什么翻提交记录。
+**JavBus 同样不发 Release**，一键安装装到的始终是最新版，改了什么见它文档末尾的「更新记录」。
 
 > ### ⚠️ 必须是 TestFlight 版的 Scripting
 >
@@ -104,7 +106,8 @@ GPL-3.0 开源并提供完整源码**——拿去改一改做成闭源 App 售�
 
 第三方来源与许可范围见 [NOTICE.md](NOTICE.md)。其中一点要如实说明：WLOC 的界面
 最初基于 BlackCCCat 的 Scripting 脚本改写，而**原脚本未声明任何许可**；协议层
-（`core/`）则是完全独立的 TypeScript 实现，未复制任何上游源码。
+（`core/`）则是完全独立的 TypeScript 实现，未复制任何上游源码。JavBus 的功能、接口与文案移植自 Nicked639 的
+JSBox 脚本 JavBus 9.2，原脚本同样没有找到公开的许可声明。
 
 ## 声明
 
@@ -114,3 +117,5 @@ GPL-3.0 开源并提供完整源码**——拿去改一改做成闭源 App 售�
 位置模拟会影响所有依赖系统定位的应用。使用导航、紧急呼叫、交通出行或位置共享
 之前，请务必先恢复真实位置。请勿用于误导他人、伪造证据、获取无权使用的服务，
 或违反任何第三方服务的规则。
+
+JavBus 是非官方客户端，不提供任何内容，所有数据来自第三方站点，可用性不受本项目控制。**含成人内容，未满十八岁禁止使用。**

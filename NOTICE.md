@@ -15,6 +15,7 @@
 | `core/` 协议层 | 本项目独立实现（见下） |
 | `pages/`、`index.tsx` 等界面 | 在 BlackCCCat 的脚本基础上改写（见下） |
 | `设备工具箱/kit/airlift.ts`、`atc.ts`、`airbeep.ts` | 思路来自 @Waa404，实现为本项目重写（见下） |
+| `JavBus/` | 功能、接口与文案移植自 Nicked639 的 JSBox 脚本 JavBus 9.2，代码用 TypeScript 重写（见下） |
 | `_selftest/` | 本项目原创 |
 | `dev-loopback/` | 本项目原创 |
 | `dts/` | **不在本仓库内**，属于 Scripting 应用作者 |
@@ -85,6 +86,22 @@ AFC 够不着。走通这条路要三步：`com.apple.streaming_zip_conduit` 把
 > **@Waa404 没有公开仓库，这里只署名致谢**，因此无从标注许可。和 BlackCCCat 那一节
 > 同样的态度：若原作者对此有任何异议，请通过 GitHub Issue 联系，我们会立即配合调整
 > 或移除相关部分。
+
+---
+
+## JavBus 的上游（Nicked639 的 JSBox 脚本）
+
+`JavBus/` 把 Nicked639 的 JSBox 脚本 **JavBus 9.2**（「你口袋中的 AV 辞典」）移植到 Scripting：功能清单、请求的页面、
+解析方式逐条对照原脚本核出来，界面和逻辑用 TypeScript / Scripting 的原生组件重写；作者声明、更新说明等文案沿用原版。
+推荐功能里的「作者精选」读的是原作者在 GitLab 上公开维护的列表，「作者推荐」走原作者的 Apps Script；
+「网友推荐」改走另做的社区推荐服务（原作者的网友推荐上传已经失效）。
+
+- 作者：Nicked639（[Telegram](https://t.me/nicked)）
+- 许可：**没有找到任何公开的许可声明**。原脚本经 JSBox / Telegram 分发；作者早年的 GitHub 仓库
+  [Nicked639/xteko](https://github.com/Nicked639/xteko) 没有 LICENSE，里面现在也已经没有 JavBus 的文件。
+
+和上面几节同样的态度：在 `script.json` 的 `contributors`、脚本设置页的「关于」、[docs/JavBus.md](docs/JavBus.md) 三处署名致谢，
+并在此说明来源与状态。**若原作者对此有任何异议，请通过 GitHub Issue 联系，我们会立即配合调整或移除相关部分。**
 
 ---
 

@@ -1,0 +1,47 @@
+{
+  "name": "JavBus",
+  "localizedNames": {
+    "zh": "JavBus",
+    "en": "JavBus"
+  },
+  "description": "JavBus 客户端（移植自 JSBox 脚本 JavBus 9.2）：有码 / 无码 / 欧美检索、女优与分类浏览、收藏与归档、磁链、样品图与预览视频、推荐、剪贴板与分享表单识别番号",
+  "localizedDescriptions": {
+    "zh": "JavBus 客户端（移植自 JSBox 脚本 JavBus 9.2）：有码 / 无码 / 欧美检索、女优与分类浏览、收藏与归档、磁链、样品图与预览视频、推荐、剪贴板与分享表单识别番号",
+    "en": "JavBus client ported from the JSBox script JavBus 9.2: censored / uncensored / western search, actress and genre browsing, favorites and archive, magnets, sample images and preview videos, recommendations, clipboard and share-sheet code detection"
+  },
+  "version": "1.0.0",
+  "author": {
+    "name": "ios151",
+    "email": null,
+    "homepage": "https://github.com/ios151"
+  },
+  "contributors": [
+    {
+      "name": "ios151",
+      "email": null,
+      "homepage": "https://github.com/ios151"
+    },
+    {
+      "name": "Nicked639",
+      "email": null,
+      "homepage": "https://t.me/nicked"
+    }
+  ],
+  "remoteResource": {
+    "url": "https://raw.githubusercontent.com/ios151/Scripting/main/dist/JavBus.zip"
+  },
+  "icon": "film.stack.fill",
+  "color": "rgba(204, 51, 68, 1)",
+  "iconImage": null,
+  "entry": "index.tsx",
+  "permissions": [
+    "clipboard",
+    "photos",
+    "fileSystem"
+  ],
+  "intentInputTypes": [
+    "Text",
+    "URLs"
+  ],
+  "runInApp": true
+}
