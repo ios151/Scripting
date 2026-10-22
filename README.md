@@ -79,7 +79,8 @@ python build-release.py
 
 1. 在仓库根建目录，放 `script.json` + `index.tsx`
 2. `script.json` 的 `remoteResource.url` 指向 `dist/<名字>.zip` 的 raw 地址
-   （**不要设 `autoUpdateInterval`**，它会按间隔自动覆盖设备上的脚本，开发期间很坑）
+   （**开发用的那份别设 `autoUpdateInterval`**：它会按间隔用已发布的 zip 覆盖设备上的脚本，开发期间很坑。
+   想让用户装好后自动更新，只在仓库里的发布版设——JavBus 就是这样，86400 秒，即每天一次；WLOC 和设备工具箱没设）
 3. 要换 zip 文件名的话，在 `build-release.py` 的 `ALIASES` 里加一行
    （中文目录名直接做文件名会让 raw 链接塞满 `%E4%BD` 这种东西）
 4. `python build-release.py`

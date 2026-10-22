@@ -28,7 +28,8 @@
     }
   ],
   "remoteResource": {
-    "url": "https://raw.githubusercontent.com/ios151/Scripting/main/dist/JavBus.zip"
+    "url": "https://raw.githubusercontent.com/ios151/Scripting/main/dist/JavBus.zip",
+    "autoUpdateInterval": 86400
   },
   "icon": "film.stack.fill",
   "color": "rgba(204, 51, 68, 1)",
