@@ -1,11 +1,11 @@
-// 字幕的界面：叠在播放器画面上的那一句（SubtitleLayer），和详情页小胶囊里的字幕菜单（SubtitleMenu）。状态与操作在 useSubtitles.ts，
+// 字幕的界面：叠在播放器画面上的那一句（SubtitleLayer），和播放器控制条里的字幕菜单（SubtitleMenu）。状态与操作在 useSubtitles.ts，
 // 颜色 / 字号 / 透明度 / 同步 / 位置的设置面板在 SubtitlePanel.tsx。
 //
 // 字幕是我们自己画的一层 Text，不是视频里的字幕轨：放在 `AVPlayerView` 上面的 ZStack 里，
 // 小窗里和我们自己的全屏（详情页横过来、整页让给播放器）里都看得到；播放器自带的全屏、画中画是另一个视图控制器，这一层跟不过去。
 // 外观（颜色 / 字号 / 文字和底条的透明度 / 双层）和位置（手指拖）存在设置里，所有影片共用，见 core/subtitleStyle.ts 和 kit/subtitleLook.ts。
 
-import { Button, GeometryReader, Menu, Spacer, Text, VStack, useEffect, useState } from "scripting";
+import { Button, GeometryReader, Menu, Spacer, Text, VStack, useEffect, useState, type VirtualNode } from "scripting";
 
 import { cueTextAt, subtitleMetrics, type SubtitleCue } from "../core/subtitle";
 import { splitLayers } from "../core/subtitleLayers";
@@ -17,8 +17,8 @@ import type { Subtitles } from "./useSubtitles";
 
 /** 多久对一次播放时间。一条字幕最短也有半秒，一秒 4 次够用；文字没变就不重绘。 */
 const TICK_MS = 250;
-/** 左右留的边：右缘有一列按钮（关闭 / 退出全屏 / 字幕 / 分享），字幕不要压到它们。 */
-const SIDE_INSET = 52;
+/** 左右留的边。控制条换成自绘以后，右缘那一列按钮没有了，不用再让出 52 点，留一点边就行。 */
+const SIDE_INSET = 20;
 /** 底条里字和边之间的空隙（左右）。算一层放得下几个字时要扣掉。 */
 const CHIP_PAD = 8;
 /** 手指要划过这么多点才算拖（点一下字幕不算）；SwiftUI 的拖动从这个距离起算，开头会跳这么一小步。 */
@@ -31,7 +31,7 @@ const HIT_V = 8;
  * 当前这一句。自己持有「当前这一句」的状态：一句话变了只重绘这个小组件，不连累整个播放器；
  * 字号和离底边的距离按叠层的实际大小算（小窗和全屏差很多，见 core/subtitle.ts 的 subtitleMetrics）。
  *
- * 手指按在字幕上可以拖着挪位置，其余地方不接管触摸（点画面照样出系统控制条）；没有字幕时整层都不接触摸。
+ * 手指按在字幕上可以拖着挪位置，其余地方不接管触摸（点画面照样亮 / 灭控制条）；没有字幕时整层都不接触摸。
  * 位置存成占叠层宽 / 高的比例，竖屏小窗里拖好的位置到了横屏全屏里还在差不多的地方。
  * 一行放不下的长句拆成上下两层，每层一块自己的底条（core/subtitleLayers.ts，设置里可关）。
  */
@@ -149,20 +149,24 @@ export const SHIFT_STEPS: { title: string; short: string; icon: string; delta: n
 ];
 
 /**
- * 「分享 / 推荐影片」那一排小胶囊里的字幕按钮：还没有字幕时是「搜索」，有了以后是显示 / 隐藏、换一条、同步，
+ * 字幕按钮的菜单：还没有字幕时是「搜索」，有了以后是显示 / 隐藏、换一条、同步，
  * 再往下是「字幕设置…」（颜色 / 字号 / 透明度 / 位置，在 SubtitlePanel.tsx）。
- * 放在页面上、不放在播放器的角落里：第一版放在播放器右下角，正好在系统控制条上方，拖进度条、点「…」时总被误点。
+ * 现在摆在播放器自绘的控制条里（PlayerCard 传一个圆钮当 label）；不传 label 就是详情页那一排小胶囊的样子。
+ * 早先放在页面上、不放播放器角落里，是因为那时用系统控制条，角落正好在它上方，拖进度条、点「…」时总被误点；
+ * 自绘的控制条里没有这个问题。
  */
-export function SubtitleMenu({ sub, onOpenPanel }: { sub: Subtitles; onOpenPanel: () => void }) {
+export function SubtitleMenu({ sub, onOpenPanel, label }: { sub: Subtitles; onOpenPanel: () => void; label?: VirtualNode }) {
   const hasCues = sub.cues !== null;
   return (
     <Menu
       label={
-        <PillLabel
-          icon={sub.busy ? "hourglass" : hasCues && sub.visible ? "captions.bubble.fill" : "captions.bubble"}
-          text={sub.busy ? "查找中…" : "字幕"}
-          active={hasCues && sub.visible && !sub.busy}
-        />
+        label ?? (
+          <PillLabel
+            icon={sub.busy ? "hourglass" : hasCues && sub.visible ? "captions.bubble.fill" : "captions.bubble"}
+            text={sub.busy ? "查找中…" : "字幕"}
+            active={hasCues && sub.visible && !sub.busy}
+          />
+        )
       }
     >
       {sub.busy ? <Button title="正在查找 / 载入字幕…" systemImage="hourglass" disabled action={() => undefined} /> : null}
@@ -181,7 +185,7 @@ export function SubtitleMenu({ sub, onOpenPanel }: { sub: Subtitles; onOpenPanel
       {hasCues ? <Button title="字幕设置…" systemImage="slider.horizontal.3" action={onOpenPanel} /> : null}
       {hasCues ? (
         <Button
-          title="播放器自带的全屏里没有字幕，可以用播放器右下角分享菜单里的「SenPlayer 打开（带字幕）」"
+          title="字幕只画在这个播放器里；要在别的播放器里带字幕，用分享菜单里的「SenPlayer 打开（带字幕）」"
           systemImage="info.circle"
           disabled
           action={() => undefined}

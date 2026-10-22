@@ -71,7 +71,6 @@ import { PlayerCard, type PlayerSource } from "./PlayerCard";
 import { RemoteImage } from "./RemoteImage";
 import { SamplesPage } from "./SamplesPage";
 import { SubtitlePanel } from "./SubtitlePanel";
-import { SubtitleMenu } from "./SubtitleParts";
 import { CARD, COLUMN_MAX, CoverBackdrop, DANGER, GLASS, INK, LINK, PillLabel, SIDE, columnWidth } from "./theme";
 import { useSubtitles } from "./useSubtitles";
 
@@ -86,9 +85,9 @@ const COLLECT_WIDTH = 124;
 const CAPSULE_GAP = 12;
 /** 参演卡片上的头像边长。 */
 const STAR_SIZE = 76;
-/** 字幕设置面板在全屏里的宽度，和离右边的距离（要让出播放器右缘那一列按钮：8 边距 + 36 直径 + 一点空隙）。 */
+/** 字幕设置面板在全屏里的宽度，和离右边的距离（控制条换成自绘以后右缘没有那列按钮了，留一点边就行）。 */
 const PANEL_WIDTH_FULLSCREEN = 352;
-const PANEL_RIGHT_GAP = 60;
+const PANEL_RIGHT_GAP = 12;
 
 type Dest =
   | { type: "magnets" }
@@ -182,14 +181,14 @@ export function MovieDetailPage({ movie }: { movie: MovieRef }) {
   const userPicked = useRef(false);
 
   const code = movie.code;
-  // 字幕的状态放在页面上：字幕按钮在下面那排小胶囊里，播放器（PlayerCard）只负责把字幕画出来；
+  // 字幕的状态放在页面上：播放器（PlayerCard）负责把字幕画出来、把字幕菜单摆进控制条；
   // 搜索时要拿视频时长排序，所以播放器把自己的 AVPlayer 放进 playerRef
   const playerRef = useRef<AVPlayer | null>(null);
   const sub = useSubtitles(code, () => playerRef.current);
   // 全屏：整页让给播放器（横屏）。点「全屏」先换布局、同时请求转横屏，转没转过去再用 Device.screen 确认（见 kit/orientation.ts）；
   // 布局不依赖「量出来的页面大小」——第一版靠 GeometryReader 量，真机上界面转了几秒就被判成转不了、转了回去
   const [fullscreen, setFullscreen] = useState(false);
-  // 字幕设置面板开着没有（SubtitlePanel：竖屏里从字幕菜单开，全屏里从播放器右缘那列按钮开）
+  // 字幕设置面板开着没有（SubtitlePanel：从控制条里字幕菜单的「字幕设置…」开，竖屏和全屏都是）
   const [panelOpen, setPanelOpen] = useState(false);
   // 我们把界面转成了横屏、还没转回来（离开页面时要转回去）
   const landscapeOn = useRef(false);
@@ -667,7 +666,9 @@ export function MovieDetailPage({ movie }: { movie: MovieRef }) {
                 source={source}
                 sub={sub}
                 avRef={playerRef}
+                title={code}
                 fullscreen={fullscreen}
+                onEnterFullscreen={enterFullscreen}
                 onExitFullscreen={exitFullscreen}
                 onOpenSubtitles={() => setPanelOpen(true)}
                 onClose={closePlayer}
@@ -827,13 +828,7 @@ export function MovieDetailPage({ movie }: { movie: MovieRef }) {
                         <Button title="举报这条推荐" systemImage="exclamationmark.bubble" action={() => void reportRecommendation()} />
                       ) : null}
                     </Menu>
-                    {/* 字幕和横屏只给完整视频：预览片段几秒钟，用不上 */}
-                    {source?.full ? <SubtitleMenu sub={sub} onOpenPanel={() => setPanelOpen(true)} /> : null}
-                    {source?.full ? (
-                      <Button buttonStyle="plain" action={enterFullscreen}>
-                        <PillLabel icon="arrow.up.left.and.arrow.down.right" text="全屏" />
-                      </Button>
-                    ) : null}
+                    {/* 字幕和全屏（只给完整视频）搬进了播放器的控制条里 */}
                     <Spacer />
                   </HStack>
                 </VStack>
@@ -923,7 +918,7 @@ export function MovieDetailPage({ movie }: { movie: MovieRef }) {
         </VStack>
       </VStack>
 
-      {/* 字幕设置面板：竖屏时浮在画面下方（画面还在上面，调的时候看得见字幕），全屏时贴在右侧、让出右缘那一列按钮 */}
+      {/* 字幕设置面板：竖屏时浮在画面下方（画面还在上面，调的时候看得见字幕），全屏时贴在右侧（右缘只留一点边）。从控制条里字幕菜单的「字幕设置…」打开 */}
       {panelOpen && source?.full ? (
         <VStack
           frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: fullscreen ? "trailing" : "bottom" }}

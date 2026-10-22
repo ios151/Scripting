@@ -449,7 +449,7 @@ export function detectLanguage(cues: SubtitleCue[]): string {
 /**
  * 字幕的字号和离底边的距离，跟着叠层的实际大小走（叠层在小窗里和在全屏里大小差很多）：
  * 小窗 361×242 约 14 / 44，横屏全屏 832×419 约 25 / 59，竖屏铺满 393×852 约 15 / 64。
- * 字号取「宽 / 26」和「高 / 17」里小的那个，免得横屏时（宽很大、高有限）字大到占满半屏；离底边至少 44，留出系统控制条的位置。
+ * 字号取「宽 / 26」和「高 / 17」里小的那个，免得横屏时（宽很大、高有限）字大到占满半屏；离底边至少 44，留出控制条的位置。
  */
 export function subtitleMetrics(width: number, height: number): { fontSize: number; bottom: number } {
   const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
