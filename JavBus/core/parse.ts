@@ -420,6 +420,55 @@ export function parseJableSearch(html: string): JableSearch | null {
   return { videoUrl, preview };
 }
 
+export interface JableResult {
+  /** 地址里的那一段：`ssis-001`、`ssis-001-c`（中文字幕版）、`ssis-001-uncensored-leak`…… */
+  slug: string;
+  videoUrl: string;
+  preview: string;
+}
+
+/**
+ * Jable 搜索页里的每一张卡片（`video-img-box`）：播放页地址和预览。搜索页只有「N 部影片」的标题行时（没有卡片）返回空。
+ * 2026-10-23 对着 Wayback 里存的真实搜索页核过卡片写法（一页 24 张，每张有 `https://jable.tv/videos/<slug>/` 和 `data-preview`）。
+ */
+export function parseJableResults(html: string): JableResult[] {
+  if (!html.includes("部影片")) return [];
+  const out: JableResult[] = [];
+  const seen = new Set<string>();
+  for (const chunk of html.split('class="video-img-box').slice(1)) {
+    const slug = /https:\/\/jable\.tv\/videos\/([^"'\s<>/]+)/.exec(chunk)?.[1];
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+    const preview = /data-preview="(https[^"]*?_preview\.mp4)/.exec(chunk)?.[1] ?? "";
+    out.push({ slug, videoUrl: `https://jable.tv/videos/${slug}/`, preview });
+  }
+  return out;
+}
+
+/**
+ * 搜索结果里挑「就是这个番号」的那一条：地址的那一段去掉符号后和番号一样排最前（`ssis-001`），
+ * 其次是同一部片的其它版本——后面多出来的是字母开头的后缀（`-c` 中文字幕、`-uncensored-leak`）；
+ * 多出来的是数字（`ssis-0012`）说明是另一部，不要。一条都对不上返回 null——
+ * 以前是直接拿第一条，搜 `SSIS-001` 排第一的可能是别的片，播出来就是错的。
+ * FC2 两种写法（`FC2-PPV-1234567` / `FC2-1234567`）算同一个。
+ */
+export function pickJableResult(results: JableResult[], code: string): JableResult | null {
+  const key = (s: string): string => alnum(s).replace(/^FC2PPV/, "FC2");
+  const want = key(code);
+  if (!want) return null;
+  let best: JableResult | null = null;
+  let bestRank = Number.POSITIVE_INFINITY;
+  for (const result of results) {
+    const got = key(result.slug);
+    const rank = got === want ? 0 : got.startsWith(want) && /^[A-Z]/.test(got.slice(want.length)) ? 1 : -1;
+    if (rank >= 0 && rank < bestRank) {
+      best = result;
+      bestRank = rank;
+    }
+  }
+  return best;
+}
+
 /** Jable 播放页里的 HLS 地址：`var hlsUrl = '…m3u8'`。 */
 export function parseJableHls(html: string): string | null {
   return /hlsUrl\s*=\s*'([^']*)'/.exec(html)?.[1] || null;

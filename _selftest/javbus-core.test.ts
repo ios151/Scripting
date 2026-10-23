@@ -14,15 +14,20 @@ import {
   addNamed,
   archiveMovie,
   emptyLibrary,
+  findArchived,
   hasActress,
   hasNamed,
+  libraryCounts,
   looksLikeBackup,
   mergeLibrary,
   movieStatus,
   normalizeLibrary,
+  pickState,
+  pickedMovies,
   removeArchived,
   removeFavorite,
   removeNamed,
+  setPicked,
 } from "../JavBus/core/library";
 import {
   BLANK_ACTRESS_INFO,
@@ -585,6 +590,45 @@ function main(): void {
     check("合并：备份里新的追加在后", same(merged.favorite.map((m) => m.code), ["FAV-1", "NEW-1"]));
     check("合并：本机已归档的不会因备份又回到收藏", movieStatus(merged, "ARC-1") === "archived");
     check("合并：归档、演员也并入", merged.archive.some((m) => m.code === "NEW-2") && merged.actress.length === 1);
+
+    // ———— 我的精选（picks）：归档里自己标的好片 ————
+    let pl = emptyLibrary();
+    pl = addFavorite(pl, movie("FAV-1"));
+    for (const code of ["P-1", "P-2", "P-3"]) pl = archiveMovie(pl, movie(code));
+    check("精选：空库、没标过 = 空", emptyLibrary().picks.length === 0 && pickState(pl, "P-1") === "off");
+    check("精选：不在归档里的片（收藏里的、库外的）不能标", pickState(pl, "FAV-1") === "unavailable" && pickState(pl, "NOPE") === "unavailable" && setPicked(pl, "FAV-1", undefined, true) === pl && setPicked(pl, "NOPE", undefined, true) === pl);
+    pl = setPicked(pl, "P-1", undefined, true);
+    pl = setPicked(pl, "P-3", "P-3", true);
+    check("精选：标上以后状态是 on，最近标的排最前", pickState(pl, "P-1") === "on" && pickState(pl, "P-2") === "off" && same(pl.picks, ["P-3", "P-1"]));
+    check("精选：重复标 / 重复取消原样返回（不触发存盘）", setPicked(pl, "P-1", undefined, true) === pl && setPicked(pl, "P-2", undefined, false) === pl);
+    check("精选：我的精选按标的先后排成归档里的片", same(pickedMovies(pl).map((m) => m.code), ["P-3", "P-1"]));
+    check("精选：取消", same(setPicked(pl, "P-3", undefined, false).picks, ["P-1"]));
+    check("精选：标记不动收藏和归档本身", pl.archive.length === 3 && pl.favorite.length === 1);
+    const skewPick = archiveMovie(emptyLibrary(), movie("X-9", { shortCode: "x-9-tail" }));
+    const skewPicked = setPicked(skewPick, "other", "X-9", true);
+    check("精选：旧数据 shortCode 和番号对不上，凭番号也能标，存的是归档条目的 shortCode", same(skewPicked.picks, ["x-9-tail"]) && pickState(skewPicked, "x-9-tail") === "on" && pickState(skewPicked, "zzz", "X-9") === "on");
+    check("精选：findArchived 两个都认", findArchived(skewPick, "x-9-tail")?.code === "X-9" && findArchived(skewPick, "zzz", "X-9")?.code === "X-9" && findArchived(skewPick, "zzz") === undefined);
+
+    const afterDelete = removeArchived(pl, "P-1");
+    check("精选：删除归档的同时精选也没了（再归档回来不会自己带着星）", same(afterDelete.picks, ["P-3"]) && pickState(archiveMovie(afterDelete, movie("P-1")), "P-1") === "off");
+    check("精选：删除别的片，精选列表保持原引用", removeArchived(pl, "P-2").picks === pl.picks);
+    check("精选：凭番号删除归档也会带走精选", removeArchived(skewPicked, "nope", "X-9").picks.length === 0);
+    check("精选：重新归档同一部（shortCode 变了）也保持精选 ⊆ 归档", archiveMovie(skewPicked, movie("X-9", { shortCode: "x-9-new" })).picks.length === 0);
+
+    const json = JSON.parse(JSON.stringify(pl));
+    check("精选：导出（JSON）里带 picks，导入后原样还原", same(json.picks, ["P-3", "P-1"]) && same(normalizeLibrary(json).picks, ["P-3", "P-1"]));
+    check("精选：原版备份没有 picks：补空；不是数组也补空", same(normalizeLibrary(legacy).picks, []) && same(normalizeLibrary({ archive: [movie("A")], picks: "A" }).picks, []));
+    check(
+      "精选：导入时洗掉不在归档里的、重复的、非字符串的、空白的",
+      same(normalizeLibrary({ archive: [movie("A"), movie("B")], favorite: [movie("C")], picks: ["B", "B", "C", "zzz", 7, "  ", " A "] }).picks, ["B", "A"]),
+    );
+    const mergedPicks = mergeLibrary(
+      pl,
+      normalizeLibrary({ archive: [movie("P-1"), movie("Q-1"), movie("FAV-1")], picks: ["Q-1", "P-1", "FAV-1"] }),
+    );
+    check("精选：合并 = 本机的在前、备份里新的追加", same(mergedPicks.picks, ["P-3", "P-1", "Q-1"]), JSON.stringify(mergedPicks.picks));
+    check("精选：合并时备份里因「本机以收藏为准」没进归档的片，它的精选也不要", !mergedPicks.picks.includes("FAV-1") && movieStatus(mergedPicks, "FAV-1") === "favorite");
+    check("精选：计入各表条数", libraryCounts(pl).picks === 2 && libraryCounts(emptyLibrary()).picks === 0);
   }
 
   console.log("MovieRef 与收藏记录");

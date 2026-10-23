@@ -140,6 +140,11 @@ export interface LibraryData {
   filmMaker: FavNamed[];
   filmEstab: FavNamed[];
   series: FavNamed[];
+  /**
+   * 「我的精选」：归档里被自己标成精选的影片的 shortCode，最近标的在最前。新增字段，原版没有（原版备份导入时补空）。
+   * 恒是归档的子集——删除归档、导入合并时都会剔掉不在归档里的（core/library.ts）。
+   */
+  picks: string[];
 }
 
 /** 能被收藏的类目种类，对应库里的四个数组。 */

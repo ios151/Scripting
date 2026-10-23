@@ -112,7 +112,7 @@ async function main(): Promise<void> {
 
     const first = await resolveMissavStream("SSIS-123");
     const web = FakeWeb.created[0];
-    check("默认用电脑版 UA，页面地址是 站点/番号", first === MASTER && web.ua === DESKTOP_UA && web.url === `${MISSAV_ORIGIN}/SSIS-123`);
+    check("默认用电脑版 UA，页面地址是 站点/小写番号", first === MASTER && web.ua === DESKTOP_UA && web.url === `${MISSAV_ORIGIN}/ssis-123`);
     check("取完就拆掉隐藏页", web.disposed);
 
     await resolveMissavStream("SSIS-123");
@@ -133,6 +133,35 @@ async function main(): Promise<void> {
     page.resources = ["https://x/a.jpg", VARIANT, MASTER];
     const viaResources = await resolveMissavStream("ABC-001");
     check("电脑版页面把 src 换成 blob: 时，从资源请求里取到主清单", viaResources === MASTER);
+  }
+
+  console.log("诊断：每一步通过 report 交出去");
+  {
+    page.video = { src: MASTER, currentSrc: "" };
+    page.resources = [];
+    const events: { state?: string; step?: string; detail?: string }[] = [];
+    const created = FakeWeb.created.length;
+    const got = await resolveMissavStream("DIA-001", undefined, (patch) => events.push(patch));
+    check("取到了：先说打开哪个地址（小写番号、哪种页面），再说取到了、地址的域名", got === MASTER && events[0]?.step === `打开 ${MISSAV_ORIGIN}/dia-001（电脑版页面）` && events.some((e) => (e.step ?? "").includes("取到视频地址") && e.detail === "surrit.com"), JSON.stringify(events));
+    check("没有把结果写成失败", events.every((e) => e.state !== "failed"));
+
+    const cached: { step?: string }[] = [];
+    await resolveMissavStream("DIA-001", undefined, (patch) => cached.push(patch));
+    check("再取一次命中缓存，诊断里写明是缓存", cached.some((e) => (e.step ?? "").includes("缓存")) && FakeWeb.created.length === created + 1);
+
+    const gone: { state?: string; step?: string }[] = [];
+    const before = FakeWeb.created.length;
+    const none = await resolveMissavStream("GONE-001", () => true, (patch) => gone.push(patch));
+    check("请求方已经离开详情页：不开页面，诊断写「没有」和原因", none === null && FakeWeb.created.length === before && gone.some((e) => e.state === "none" && (e.step ?? "").includes("离开")), JSON.stringify(gone));
+
+    const a: { step?: string }[] = [];
+    const b: { step?: string }[] = [];
+    page.video = { src: MASTER, currentSrc: "" };
+    const [x, y] = await Promise.all([
+      resolveMissavStream("DIA-002", undefined, (patch) => a.push(patch)),
+      resolveMissavStream("DIA-002", undefined, (patch) => b.push(patch)),
+    ]);
+    check("同一部片的并发请求合并成一次，后来的那个看得到「已经在取了」，也收得到进展", x === MASTER && y === MASTER && b.some((e) => (e.step ?? "").includes("已经在取")) && b.some((e) => (e.step ?? "").includes("取到视频地址")), JSON.stringify(b));
   }
 
   clearTimeout(watchdog);

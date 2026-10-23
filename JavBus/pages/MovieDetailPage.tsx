@@ -35,11 +35,13 @@ import {
 import { FALLBACK_COVER, MISSAV_ORIGIN } from "../core/constants";
 import { releaseLine, safeFileName, todayString } from "../core/format";
 import { shortCodeOf } from "../core/keyword";
+import { pickState } from "../core/library";
 import { initialPhase, nextPhase, type Phase } from "../core/phase";
 import { isProbing, pickBestSource, playSubline, type Previews } from "../core/playback";
 import { REPORT_REASONS, type UploadOutcome } from "../core/recommend";
 import { favMovieOf } from "../core/refs";
 import { coverFromThumb, isBigCover } from "../core/site";
+import { createTracker, formatDiagnostics, fullVideoStatus, type Board } from "../core/sourceDiag";
 import type { MovieDetail, MovieRef, NamedLink, RecItem, StarItem } from "../core/types";
 import { loadDetail } from "../kit/detail";
 import { describeError } from "../kit/http";
@@ -47,18 +49,11 @@ import { loadImage } from "../kit/images";
 import { loadMagnets } from "../kit/magnets";
 import { resolveMissavStream } from "../kit/missav";
 import { enterLandscape, exitLandscape, restoreOrientation, waitForLandscape } from "../kit/orientation";
-import {
-  fanzaPreviewUrl,
-  findJable,
-  findJableHls,
-  findJavdbRating,
-  findMissavPreview,
-  probeVideo,
-  type RatingState,
-} from "../kit/previews";
+import { fanzaPreviewUrl, findJavdbRating, probeVideo, type RatingState } from "../kit/previews";
 import { recKindOf, sendRecommendation, sendReport, useRecVersion, usesCommunity } from "../kit/recommend";
 import { getSettings } from "../kit/settings";
 import { buildShareLink, copyText, shareItems } from "../kit/share";
+import { traceFindJable, traceFindJableHls, traceFindMissavPreview } from "../kit/sourceProbe";
 import { store, useLibrary } from "../kit/store";
 import { showError, showToast } from "../kit/toast";
 import { translateToChinese } from "../kit/translate";
@@ -171,6 +166,23 @@ export function MovieDetailPage({ movie }: { movie: MovieRef }) {
     jableHls: undefined,
     missavFull: undefined,
   });
+  // 片源诊断（core/sourceDiag.ts）：每个片源取没取到、卡在哪一步、用了多久，点「片源诊断」看。
+  // 用户反馈「大部分片没有完整版」，而 MissAV / Jable 的页面都躲在 Cloudflare 验证页后面，光看「有 / 没有」分不清是没有还是被拦了
+  const [diag, setDiag] = useState<Board>({});
+  const mounted = useRef(true);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+    },
+    [],
+  );
+  const trackRef = useRef<ReturnType<typeof createTracker> | null>(null);
+  if (trackRef.current === null) {
+    trackRef.current = createTracker((id, entry) => {
+      if (mounted.current) setDiag((prev) => ({ ...prev, [id]: entry }));
+    });
+  }
+  const track = trackRef.current;
   const [rating, setRating] = useState<RatingState | undefined>(undefined);
   const [phase, setPhase] = useState<Phase>(() =>
     initialPhase(movie.context, cardStatus(lib, { code: movie.code, link: movie.link })),
@@ -196,6 +208,11 @@ export function MovieDetailPage({ movie }: { movie: MovieRef }) {
   const rotateToken = useRef(0);
   const shortCode = movie.fallback ? code : shortCodeOf(movie.link);
   const phaseView = PHASE_VIEW[phase];
+  // 「播放」按钮第二行：探测完了、完整视频的路都没取到、手上只有预览时，加一句，提醒去「片源诊断」看原因
+  const bestSource = pickBestSource(previews);
+  // 关了「后台预取 MissAV」又没手动点过 MissAV 完整视频时，MissAV 那条路没试过，不能说「无完整视频」
+  const noFullHint = !source && bestSource !== null && !bestSource.full && diag.missavFull !== undefined && fullVideoStatus(diag) === "failed";
+  const playLine = playSubline(previews, source?.label ?? null) + (noFullHint ? " · 无完整视频" : "");
   // 评分每次请求领一个序号，只认最新那次：换片、点「重新获取评分」、离开页面，旧结果都作废
   const ratingSeq = useRef(0);
   const loadRating = () => {
@@ -241,15 +258,17 @@ export function MovieDetailPage({ movie }: { movie: MovieRef }) {
     const patch = (p: Partial<Previews>) => {
       if (alive) setPreviews((prev) => ({ ...prev, ...p }));
     };
-    const missavTask = findMissavPreview(code);
-    const jableTask = findJable(code);
+    setDiag({});
+    const missavTask = track("missavPreview", (report) => traceFindMissavPreview(code, report));
+    const left = () => !alive;
+    const jableTask = track("jable", (report) => traceFindJable(code, report, undefined, left));
     void missavTask.then((url) => patch({ missav: url }));
     void jableTask.then(async (found) => {
       patch({ jable: found });
-      if (found) patch({ jableHls: await findJableHls(found.videoUrl) });
+      if (found && alive) patch({ jableHls: await track("jableHls", (report) => traceFindJableHls(found.videoUrl, report, undefined, left)) });
     });
     if (getSettings().prefetchMissav) {
-      void resolveMissavStream(code, () => !alive).then((url) => patch({ missavFull: url }));
+      void track("missavFull", (report) => resolveMissavStream(code, left, report)).then((url) => patch({ missavFull: url }));
     }
     // 自动播放：MissAV 预览一到就播；Jable 只在 MissAV 没有时才补（不用等 Jable 慢吞吞的探测）
     const mayAutoplay = () => alive && !userPicked.current && getSettings().autoPreview;
@@ -384,13 +403,22 @@ export function MovieDetailPage({ movie }: { movie: MovieRef }) {
       return;
     }
     showToast("正在获取 MissAV 完整视频…");
-    const url = await resolveMissavStream(code);
+    const url = await track("missavFull", (report) => resolveMissavStream(code, undefined, report));
     if (url) {
       setPreviews((p) => ({ ...p, missavFull: url }));
       play({ url, label: "MissAV 完整视频", full: true });
     } else {
-      showError("没有找到 MissAV 完整视频");
+      showError("没有找到 MissAV 完整视频（点「片源诊断」看原因）");
     }
+  };
+
+  /** 诊断弹窗：每个片源的结果、最后一步、原因、用时；可以复制出去发给开发者。 */
+  const showDiagnostics = async () => {
+    const report = formatDiagnostics(code, diag, Date.now());
+    const copy = await Dialog.confirm({ title: "片源诊断", message: report, confirmLabel: "复制", cancelLabel: "关闭" });
+    if (!copy) return;
+    await copyText(report);
+    showToast("诊断已复制，可以发给开发者");
   };
 
   const fanzaBusy = useRef(false);
@@ -533,6 +561,31 @@ export function MovieDetailPage({ movie }: { movie: MovieRef }) {
   };
 
   const recKind = recKindOf(code);
+
+  // 我的精选（core/library.ts 的 picks）：只对已归档的片，「看完归档、再按喜好标精选」；标的时候可以顺便公开推荐给网友
+  const pick = pickState(lib, shortCode, code);
+  const togglePick = async () => {
+    if (pick === "on") {
+      store.setPicked(shortCode, code, false);
+      showToast("已移出我的精选");
+      return;
+    }
+    // 这部片还不在网友推荐 / 作者推荐里时才问要不要推荐给网友（已经在的，再推荐也会被服务端拒）
+    let alsoRecommend = false;
+    if (!recKind) {
+      const choice = await Dialog.actionSheet({
+        title: "加入我的精选",
+        message: "精选只记在你自己的归档里。也可以同时推荐给网友：会公开提交到「推荐」里的「网友推荐」，大家都看得到。",
+        actions: [{ label: "只加入我的精选" }, { label: "加入并推荐给网友" }],
+      });
+      if (choice === null) return;
+      alsoRecommend = choice === 1;
+    }
+    store.setPicked(shortCode, code, true);
+    HapticFeedback.lightImpact();
+    if (alsoRecommend) await reportOutcome(sendRecommendation("user", "upload", shareRecItem()));
+    else showToast("已加入我的精选");
+  };
 
   // ———— 页面内容 ————
 
@@ -739,7 +792,7 @@ export function MovieDetailPage({ movie }: { movie: MovieRef }) {
 
                 {/* 操作：醒目的播放 + 收藏 */}
                 <HStack spacing={CAPSULE_GAP} frame={{ width: colWidth }}>
-                  <PlayCapsule subline={playSubline(previews, source?.label ?? null)} width={playWidth} onPress={playBest} />
+                  <PlayCapsule subline={playLine} width={playWidth} onPress={playBest} />
                   <CollectCapsule
                     icon={phaseView.icon}
                     title={phaseView.title}
@@ -775,7 +828,7 @@ export function MovieDetailPage({ movie }: { movie: MovieRef }) {
                           title="Jable 完整视频"
                           action={() => {
                             if (previews.jableHls) play({ url: previews.jableHls, label: "Jable 完整视频", full: true });
-                            else showError("未找到完整影片！");
+                            else showError("未找到完整影片（点「片源诊断」看原因）");
                           }}
                         />
                       ) : null}
@@ -828,6 +881,14 @@ export function MovieDetailPage({ movie }: { movie: MovieRef }) {
                         <Button title="举报这条推荐" systemImage="exclamationmark.bubble" action={() => void reportRecommendation()} />
                       ) : null}
                     </Menu>
+                    {pick === "unavailable" ? null : (
+                      <Button buttonStyle="plain" action={() => void togglePick()}>
+                        <PillLabel icon={pick === "on" ? "star.fill" : "star"} text="精选" tint={pick === "on" ? "#ffd166" : undefined} />
+                      </Button>
+                    )}
+                    <Button buttonStyle="plain" action={() => void showDiagnostics()}>
+                      <PillLabel icon="stethoscope" text="片源诊断" />
+                    </Button>
                     {/* 字幕和全屏（只给完整视频）搬进了播放器的控制条里 */}
                     <Spacer />
                   </HStack>

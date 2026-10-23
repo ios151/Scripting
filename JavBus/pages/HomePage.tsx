@@ -119,6 +119,15 @@ export function HomePage() {
     }
   };
 
+  /**
+   * 搜索框的内容变了。清空（打字删光、点右边的 ×）就是退出搜索、回到该分区的最新列表——
+   * 以前只清了框，列表还停在上一次的搜索结果上：框是空的、下面却只有搜出来的两三部，看起来像「最新只有两部」。
+   */
+  const changeInput = (text: string) => {
+    setInput(text);
+    if (text === "") setView((v) => (v.query.mode === "search" ? { ...v, query: { mode: "home" } } : v));
+  };
+
   // 其他页面递来的请求。ref 存最新闭包，订阅只挂一次
   const handle = useRef<(request: LaunchRequest) => void>(() => undefined);
   handle.current = (request) => {
@@ -170,7 +179,7 @@ export function HomePage() {
         >
           <VStack spacing={14} padding={{ top: 8, bottom: 24 }}>
             <VStack spacing={10} padding={{ horizontal: SIDE }}>
-              <SearchBar value={input} onChanged={setInput} onSubmit={() => void runSearch(input)} />
+              <SearchBar value={input} onChanged={changeInput} onSubmit={() => void runSearch(input)} />
               <HStack spacing={8}>
                 <Segmented
                   width={kindWidth}

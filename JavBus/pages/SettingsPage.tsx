@@ -108,6 +108,7 @@ function CountRow({ label, value }: { label: string; value: string }) {
 const COUNT_LABELS: [keyof ReturnType<typeof libraryCounts>, string][] = [
   ["favorite", "收藏影片"],
   ["archive", "归档影片"],
+  ["picks", "我的精选"],
   ["actress", "收藏演员"],
   ["director", "收藏导演"],
   ["series", "收藏系列"],

@@ -19,6 +19,7 @@ import {
   removeArchived,
   removeFavorite,
   removeNamed,
+  setPicked,
 } from "../core/library";
 import type { FavActress, FavMovie, FavNamed, LibraryData, NamedKind } from "../core/types";
 
@@ -67,6 +68,8 @@ export const store = {
   cancelFavorite: (shortCode: string, code?: string) => commit(removeFavorite(library(), shortCode, code)),
   archive: (movie: FavMovie) => commit(archiveMovie(library(), movie)),
   deleteArchived: (shortCode: string, code?: string) => commit(removeArchived(library(), shortCode, code)),
+  /** 标 / 取消「我的精选」（只对归档里的片有效）。 */
+  setPicked: (shortCode: string, code: string | undefined, on: boolean) => commit(setPicked(library(), shortCode, code, on)),
   addActress: (a: FavActress) => commit(addActress(library(), a)),
   removeActress: (shortCode: string) => commit(removeActress(library(), shortCode)),
   addNamed: (kind: NamedKind, item: FavNamed) => commit(addNamed(library(), kind, item)),

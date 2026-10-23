@@ -13,6 +13,7 @@ const FILE_NAME = "JavBusBackup.json";
 const LABELS: [keyof ReturnType<typeof libraryCounts>, string][] = [
   ["favorite", "影片"],
   ["archive", "归档"],
+  ["picks", "精选"],
   ["actress", "演员"],
   ["director", "导演"],
   ["series", "系列"],

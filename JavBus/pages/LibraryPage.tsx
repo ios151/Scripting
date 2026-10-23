@@ -22,6 +22,7 @@ import {
   useState,
 } from "scripting";
 
+import { pickedMovies } from "../core/library";
 import { refFromFav } from "../core/refs";
 import { namedLink, starLink } from "../core/site";
 import type { FavMovie, MovieItem, NamedKind, StarItem } from "../core/types";
@@ -44,6 +45,8 @@ const SEG_ITEMS: { key: Seg; label: string }[] = [
   { key: "favorite", label: "收藏" },
   { key: "archive", label: "归档" },
 ];
+/** 归档里看全部，还是只看「我的精选」（core/library.ts 的 picks，在详情页点「加精选」标）。 */
+type ArcFilter = "all" | "picks";
 type Sub = "movie" | "actress" | NamedKind;
 
 const SUBS: { key: Sub; label: string; unit: string }[] = [
@@ -84,13 +87,16 @@ export function LibraryPage() {
   const [seg, setSeg] = useState<Seg>("favorite");
   const [sub, setSub] = useState<Sub>("movie");
   const [input, setInput] = useState("");
+  const [arcFilter, setArcFilter] = useState<ArcFilter>("all");
 
   const favItems = useMemo(() => lib.favorite.map(asItem), [lib.favorite]);
   const arcItems = useMemo(() => {
     const keyword = input.trim().toUpperCase();
-    const list = keyword ? lib.archive.filter((m) => m.code.toUpperCase().includes(keyword)) : lib.archive;
+    const base = arcFilter === "picks" ? pickedMovies(lib) : lib.archive;
+    const list = keyword ? base.filter((m) => m.code.toUpperCase().includes(keyword)) : base;
     return list.map(asItem);
-  }, [lib.archive, input]);
+  }, [lib, input, arcFilter]);
+  const pickedSet = useMemo(() => new Set(lib.picks), [lib.picks]);
 
   const favByLink = useMemo(() => new Map(lib.favorite.map((m) => [asItem(m).link, m])), [lib.favorite]);
   const arcByLink = useMemo(() => new Map(lib.archive.map((m) => [asItem(m).link, m])), [lib.archive]);
@@ -132,7 +138,9 @@ export function LibraryPage() {
   const body = (() => {
     if (seg === "archive") {
       if (arcItems.length === 0) {
-        return emptyView(input ? "没有匹配的归档" : "没有归档", input ? "换个番号试试" : "在收藏的影片详情页点「归档」即可");
+        if (input) return emptyView(arcFilter === "picks" ? "没有匹配的精选" : "没有匹配的归档", "换个番号试试");
+        if (arcFilter === "picks") return emptyView("还没有精选", "在已归档影片的详情页点「加精选」，或长按归档里的影片");
+        return emptyView("没有归档", "在收藏的影片详情页点「归档」即可");
       }
       return (
         <MovieGrid
@@ -144,18 +152,36 @@ export function LibraryPage() {
             return <MovieDetailPage movie={fav ? refFromFav(fav, "archive") : { link: item.link, code: item.code, cover: item.cover, info: item.code, context: "archive" }} />;
           }}
           recFor={(item) => recKindOf(item.code)}
+          pickedFor={(item) => {
+            const fav = arcByLink.get(item.link);
+            return !!fav && pickedSet.has(fav.shortCode);
+          }}
           infoFor={(item) => arcByLink.get(item.link)?.info}
-          menuFor={(item) => (
-            <Button
-              title="删除归档"
-              systemImage="trash"
-              role="destructive"
-              action={() => {
-                const fav = arcByLink.get(item.link);
-                if (fav) store.deleteArchived(fav.shortCode, fav.code);
-              }}
-            />
-          )}
+          menuFor={(item) => {
+            const fav = arcByLink.get(item.link);
+            const picked = !!fav && pickedSet.has(fav.shortCode);
+            return (
+              <>
+                <Button
+                  title={picked ? "移出我的精选" : "加入我的精选"}
+                  systemImage={picked ? "star.slash" : "star"}
+                  action={() => {
+                    if (!fav) return;
+                    store.setPicked(fav.shortCode, fav.code, !picked);
+                    showToast(picked ? "已移出我的精选" : "已加入我的精选");
+                  }}
+                />
+                <Button
+                  title="删除归档"
+                  systemImage="trash"
+                  role="destructive"
+                  action={() => {
+                    if (fav) store.deleteArchived(fav.shortCode, fav.code);
+                  }}
+                />
+              </>
+            );
+          }}
         />
       );
     }
@@ -251,7 +277,9 @@ export function LibraryPage() {
                 onSubmit={submit}
                 prompt={
                   seg === "archive"
-                    ? `已归档 ${lib.archive.length} 部影片，输入番号过滤`
+                    ? arcFilter === "picks"
+                      ? `我的精选 ${lib.picks.length} 部影片，输入番号过滤`
+                      : `已归档 ${lib.archive.length} 部影片，输入番号过滤`
                     : `已收藏 ${counts[sub]} ${subMeta.unit}`
                 }
               />
@@ -266,7 +294,16 @@ export function LibraryPage() {
             </VStack>
             {seg === "favorite" ? (
               <ChipBar items={SUBS.map((s) => ({ key: s.key, label: `${s.label} ${counts[s.key]}` }))} selected={sub} onSelect={setSub} />
-            ) : null}
+            ) : (
+              <ChipBar
+                items={[
+                  { key: "all" as const, label: `全部 ${lib.archive.length}` },
+                  { key: "picks" as const, label: `我的精选 ${lib.picks.length}` },
+                ]}
+                selected={arcFilter}
+                onSelect={setArcFilter}
+              />
+            )}
             {body}
           </VStack>
         </ScrollView>

@@ -188,6 +188,7 @@ export function MovieCell({
   item,
   status,
   rec,
+  picked,
   infoText,
   menu,
   onAppear,
@@ -196,6 +197,8 @@ export function MovieCell({
   status: CardStatus;
   /** 推荐角标：作者橙、网友紫。 */
   rec?: "author" | "user" | null;
+  /** 我的精选：右下角在归档盒前面多一颗金色的星。 */
+  picked?: boolean;
   /** 底部那行字，默认「番号 | 日期」；按「 | 」拆成两行。 */
   infoText?: string;
   /** 长按菜单（收藏页里用来取消收藏 / 归档 / 删除）。 */
@@ -241,6 +244,7 @@ export function MovieCell({
           </VStack>
           <Spacer />
           {status === "favorite" ? <Image systemName="heart.fill" font={13} foregroundStyle="#ff6b81" /> : null}
+          {picked ? <Image systemName="star.fill" font={13} foregroundStyle="#ffd166" /> : null}
           {archived ? <Image systemName="archivebox.fill" font={12} foregroundStyle={INK.soft} /> : null}
         </HStack>
       </VStack>
@@ -254,6 +258,7 @@ export function MovieGrid({
   lib,
   destinationFor,
   recFor,
+  pickedFor,
   infoFor,
   menuFor,
   showStatus = true,
@@ -263,6 +268,7 @@ export function MovieGrid({
   lib: LibraryData;
   destinationFor: (item: MovieItem) => VirtualNode;
   recFor?: (item: MovieItem) => "author" | "user" | null;
+  pickedFor?: (item: MovieItem) => boolean;
   infoFor?: (item: MovieItem) => string | undefined;
   menuFor?: (item: MovieItem) => VirtualNode;
   /** 按收藏 / 归档状态给封面标记或虚化。收藏页、归档页本身就是库，不能再标（原版那两个列表不染）。 */
@@ -279,6 +285,7 @@ export function MovieGrid({
             item={item}
             status={showStatus ? statusIn(index, item) : "none"}
             rec={recFor?.(item) ?? null}
+            picked={pickedFor?.(item) ?? false}
             infoText={infoFor?.(item)}
             menu={menuFor?.(item)}
             onAppear={onNearEnd && position >= items.length - 6 ? onNearEnd : undefined}
