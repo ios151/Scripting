@@ -21,6 +21,7 @@ DIST = os.path.join(HERE, "dist")
 ALIASES = {
     "WLOC 虚拟定位": "WLOC",
     "设备工具箱": "DeviceToolbox",
+    "快捷指令签名": "ShortcutSigner",
 }
 
 SKIP = {"dist", "node_modules", "__pycache__"}

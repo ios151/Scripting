@@ -16,6 +16,7 @@
 | `pages/`、`index.tsx` 等界面 | 在 BlackCCCat 的脚本基础上改写（见下） |
 | `设备工具箱/kit/airlift.ts`、`atc.ts`、`airbeep.ts` | 思路来自 @Waa404，实现为本项目重写（见下） |
 | `JavBus/` | 功能、接口与文案移植自 Nicked639 的 JSBox 脚本 JavBus 9.2，代码用 TypeScript 重写（见下） |
+| `快捷指令签名/` | 本项目独立实现，没有拷贝任何上游源码；签名流程参考了 0xilis 的格式研究（见下） |
 | `_selftest/` | 本项目原创 |
 | `dev-loopback/` | 本项目原创 |
 | `dts/` | **不在本仓库内**，属于 Scripting 应用作者 |
@@ -102,6 +103,50 @@ AFC 够不着。走通这条路要三步：`com.apple.streaming_zip_conduit` 把
 
 和上面几节同样的态度：在 `script.json` 的 `contributors`、脚本设置页的「关于」、[docs/JavBus.md](docs/JavBus.md) 三处署名致谢，
 并在此说明来源与状态。**若原作者对此有任何异议，请通过 GitHub Issue 联系，我们会立即配合调整或移除相关部分。**
+
+---
+
+## 快捷指令签名的上游（0xilis）
+
+`快捷指令签名/` 的代码是自己用 TypeScript 写的，没有拷贝任何上游源码。下面是它参考过格式研究的上游：
+
+| 上游 | 借鉴了什么 | 许可 |
+|---|---|---|
+| [libshortcutsign](https://github.com/0xilis/libshortcutsign) / [shortcut-sign](https://github.com/0xilis/shortcut-sign) / libNeoAppleArchive（0xilis） | AEA1 容器的签名流程：密钥推导的次序、HMAC 链、签名覆盖的范围；对 WorkflowKit 签名校验的逆向分析（见其博客 *Reversing Contact Signed Shortcuts*） | MIT，全文见下 |
+| RFC 6979 附录 A.2.5 | ECDSA-P256 实现拿它的已知答案（固定 k 的 r / s）核对过 | 公开文档 |
+
+libshortcutsign 的 MIT 许可全文：
+
+```
+MIT License
+
+Copyright (c) 2024 0xilis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+shortcut-sign 同为 MIT（Copyright (c) 2025 Snoolie Keffaber），许可文本与上面相同。
+
+在 `script.json` 的 `contributors`、[docs/快捷指令签名.md](docs/快捷指令签名.md) 两处署名致谢。
+
+写入端的验证用到了本机存的 24 个 Apple 官方签名的 `.shortcut`（多为他人作品），这些样本**不在本仓库内**。
+Apple、iOS、Shortcuts（快捷指令）是 Apple Inc. 的商标，本脚本与 Apple 无隶属关系。
 
 ---
 

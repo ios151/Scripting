@@ -27,7 +27,8 @@
     "./dts/*.d.ts",
     "WLOC 虚拟定位",
     "设备工具箱",
-    "JavBus"
+    "JavBus",
+    "快捷指令签名"
   ],
   "exclude": [
     "./dts/scripting.d.ts"

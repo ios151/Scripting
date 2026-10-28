@@ -1,0 +1,44 @@
+{
+  "name": "快捷指令签名",
+  "localizedNames": {
+    "zh": "快捷指令签名",
+    "en": "Shortcut Signer"
+  },
+  "description": "在手机本机给快捷指令签名：不要服务器、不要 Mac、不靠第三方。自己生成根证书，装到手机并信任，再签出可以直接导入的 .shortcut 文件",
+  "localizedDescriptions": {
+    "zh": "在手机本机给快捷指令签名：不要服务器、不要 Mac、不靠第三方。自己生成根证书，装到手机并信任，再签出可以直接导入的 .shortcut 文件",
+    "en": "Sign Shortcuts on-device: no server, no Mac, no third party. Generates your own root certificate, you trust it once, then it signs importable .shortcut files"
+  },
+  "version": "0.1.0",
+  "author": {
+    "name": "ios151",
+    "email": null,
+    "homepage": "https://github.com/ios151"
+  },
+  "contributors": [
+    {
+      "name": "ios151",
+      "email": null,
+      "homepage": "https://github.com/ios151"
+    },
+    {
+      "name": "0xilis",
+      "email": null,
+      "homepage": "https://github.com/0xilis"
+    }
+  ],
+  "remoteResource": {
+    "url": "https://raw.githubusercontent.com/ios151/Scripting/main/dist/ShortcutSigner.zip"
+  },
+  "icon": "checkmark.seal.fill",
+  "color": "rgba(10, 132, 255, 1)",
+  "entry": "index.tsx",
+  "permissions": [
+    "clipboard",
+    "fileSystem"
+  ],
+  "intentInputTypes": [
+    "FileURLs"
+  ],
+  "runInApp": true
+}
