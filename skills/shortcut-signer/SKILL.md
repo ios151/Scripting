@@ -62,6 +62,8 @@ metadata:
 
 **每次开始前先跑一次 `status`**：便宜、只读、不会生成任何东西。证书没就绪就别急着签，先告诉用户怎么办（见「证书没就绪时怎么说」）；草稿可以照常写、照常检查。`status` 报 `launch` / `no_result` / `outdated`（脚本没装或太旧）也不用停：草稿照写、照 `check`，只是到签名那一步要先让用户装 / 更新脚本。
 
+**证书确认就绪之后，`status` 直接答「就绪」，不会再去启动脚本**（结果里带 `"cached": true`），所以配置好之后每次先跑 `status` 也不会弹出脚本的页面。技能自己记着这个答案：`status` 或 `sign` 的结果里 `certificate.usable` 为 `true` 就记下，不是 `true` 就清掉，所以**没就绪的状态每次都会真的去问脚本**。用户说他重新生成了证书、或者你怀疑状态变了，就加 `"refresh": true` 强制重问一次。`sign` 每次都是真的经脚本做，它结果里的 `certificate` 总是最新的。
+
 # 调用方式
 
 所有调用都是同一个入口：
@@ -103,6 +105,13 @@ scripting-ts run "<skill_dir>/scripts/sign.ts" --queryparameters '{"operation":"
 - `confirmedInstalled`：用户有没有在脚本里打「我已经装好并信任了这张证书」的勾。**这是用户的自述，不是系统检测的结果。**
 - `usable`：`generated` 且 `confirmedInstalled`。只有它为 `true`，才可以对用户说「签好的文件可以导入」。
 - `nextStep`：下一步该做什么，写给你看的，转述给用户即可；没有待办就是 `null`。
+- `cached` / `checkedAt`：只有**技能直接答的**这种结果才有（证书之前已经确认就绪，这次没去问脚本）。`cached` 是 `true`，`checkedAt` 是记下这个答案的时间。这种结果里 `usable` 一定是 `true`、`nextStep` 是 `null`。
+
+证书确认就绪之后的 `status` 就是这样直接答的，不会启动脚本。想强制重问一次脚本（用户说重新生成了证书、或者你怀疑状态变了）：
+
+```bash
+scripting-ts run "<skill_dir>/scripts/sign.ts" --queryparameters '{"operation":"status","refresh":true}' --timeout 30
+```
 
 ## operation: check
 
@@ -346,7 +355,7 @@ scripting-ts run "<skill_dir>/scripts/sign.ts" --queryparameters '{"operation":"
 4. 回到脚本，在第二步底下打勾「我已经装好并信任了这张证书」；
 5. 可选：点第三步「试签一个测试快捷指令」，导入并运行，弹出提示框就说明整条链路通了。
 
-做完之后你再跑一次 `status`，`usable` 变成 `true` 才算就绪。
+做完之后你再跑一次 `status`，`usable` 变成 `true` 才算就绪（没就绪的时候 `status` 每次都真的去问脚本，不用加 `refresh`）。
 
 # 安全规则
 
@@ -386,8 +395,8 @@ shortcut-signer/
 ├── skill.json                       图标和颜色
 ├── schema.json                      sign.ts 的参数 schema
 ├── scripts/
-│   ├── sign.ts                      调用入口，只接线：Script.queryParameters → router → Script.exit
-│   ├── router.ts                    路由：check 留在本地，status / sign 才用 Script.run 交给「快捷指令签名」脚本
+│   ├── sign.ts                      调用入口，只接线：Script.queryParameters → router → Script.exit；用 Storage 记「证书已就绪」
+│   ├── router.ts                    路由：check 留在本地，status / sign 才用 Script.run 交给「快捷指令签名」脚本；证书就绪后 status 直接答
 │   └── localCheck.ts                本地检查（check）：读文件 → 读 plist → 检查器 → 整形
 ├── vendor/                          和脚本里同名文件逐字节相同的副本（检查器及其依赖），改动要先改脚本那边再复制过来
 │   ├── core/                        bytes / plist / check / read / report / names

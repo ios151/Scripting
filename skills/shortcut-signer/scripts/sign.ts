@@ -6,14 +6,27 @@
 // 这个文件从不抛：所有失败都变成 { ok: false, error: { type, message } }，和脚本那边的格式一致。
 
 import { Script } from "scripting"
-import { route, SIGNER_SCRIPT } from "./router"
+import { route, SIGNER_SCRIPT, type CertificateCache } from "./router"
 
 type Args = Record<string, any>
+
+/** 技能记「证书已就绪」用的键。Storage 默认是技能自己的私有域；读写出错 router 一律当没有，不会拦住主流程。 */
+const CERTIFICATE_KEY = "certificate_ready_v1"
+
+const cache: CertificateCache = {
+  read: () => Storage.get<unknown>(CERTIFICATE_KEY),
+  write: (value) => {
+    if (value === null) Storage.remove(CERTIFICATE_KEY)
+    else Storage.set(CERTIFICATE_KEY, value)
+  },
+}
 
 function exit(payload: Args): void {
   Script.exit(JSON.stringify(payload))
 }
 
-route((Script.queryParameters ?? {}) as Args, {
-  run: (queryParameters) => Script.run<Args>({ name: SIGNER_SCRIPT, queryParameters }),
-}).then(exit, (error) => exit({ ok: false, error: { type: "internal", message: error instanceof Error ? error.message : String(error) } }))
+route(
+  (Script.queryParameters ?? {}) as Args,
+  { run: (queryParameters) => Script.run<Args>({ name: SIGNER_SCRIPT, queryParameters }) },
+  cache,
+).then(exit, (error) => exit({ ok: false, error: { type: "internal", message: error instanceof Error ? error.message : String(error) } }))

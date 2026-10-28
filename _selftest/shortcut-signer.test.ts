@@ -97,7 +97,7 @@ import { isFailure, pickFromClipboard, pickFromFiles, pickFromUrl, sourcesFromPa
 import { looksLikeLzfse, nativeCompress, nativeDecompress } from "../快捷指令签名/kit/lzfse";
 // 技能里的东西：路由和本地检查（router.ts 不 import "scripting"，Node 里能直接测）
 import { runLocalCheck } from "../skills/shortcut-signer/scripts/localCheck";
-import { REQUIRED_API_VERSION, route, SIGNER_SCRIPT, type SignerRunner } from "../skills/shortcut-signer/scripts/router";
+import { REQUIRED_API_VERSION, route, SIGNER_SCRIPT, type CertificateCache, type SignerRunner } from "../skills/shortcut-signer/scripts/router";
 import {
   certificateReady,
   ensureIdentity,
@@ -1994,6 +1994,18 @@ function testSkill(): void {
     "sign.ts 只接线：从 router 取路由、用 Script.run 调脚本、用 Script.exit 交回",
     /from "\.\/router"/.test(entry) && /\broute\(/.test(entry) && /\bScript\.run\b/.test(entry) && /\bScript\.exit\(/.test(entry),
   );
+  // 状态缓存：Storage 的读写只在入口里接（router 不碰，Node 里才测得了），schema 里有 refresh，SKILL.md 讲了
+  const routerCode = read("scripts", "router.ts").replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, "");
+  check(
+    "状态缓存的接线：sign.ts 用 Storage 读写并把 cache 交给 route，router.ts 的代码里没有 Storage",
+    /\bStorage\.get\b/.test(entry) && /\bStorage\.set\b/.test(entry) && /\bStorage\.remove\b/.test(entry) && /,\s*cache\s*,?\s*\)/.test(entry) && !/\bStorage\b/.test(routerCode),
+  );
+  const schemaProperties = (JSON.parse(read("schema.json")) as { properties: Record<string, { type?: string }> }).properties;
+  check("schema.json 里有布尔的 refresh（status 强制重问脚本）", schemaProperties.refresh?.type === "boolean");
+  check(
+    "SKILL.md 讲了状态缓存：cached、refresh 的调用写法，以及没就绪的状态每次都问脚本",
+    skillMd.includes('"cached": true') && skillMd.includes('{"operation":"status","refresh":true}') && skillMd.includes("没就绪的状态每次都会真的去问脚本"),
+  );
 
   // ---- SKILL.md 里的引用都存在 ----
   const referenced = [...skillMd.matchAll(/<skill_dir>\/([A-Za-z0-9_./-]+)/g)].map((match) => match[1].replace(/\.+$/, ""));
@@ -2261,6 +2273,175 @@ async function testSkillCheck(): Promise<void> {
     check(
       "路由：版本够用的结果、没有版本号的失败，都原样交回",
       (await route({ operation: "status" }, { run: async () => fresh })) === fresh && (await route({ operation: "status" }, { run: async () => failed })) === failed,
+    );
+
+    // ---- 状态缓存：证书确认就绪之后，status 直接答，不再启动脚本（用户反馈每次查证书都弹出一个页面） ----
+    const certificateOf = (usable: boolean, overrides: Record<string, unknown> = {}) => ({
+      generated: true,
+      confirmedInstalled: usable,
+      usable,
+      name: "测试根证书",
+      fingerprint: "AA:BB:CC",
+      expires: "2099-01-01",
+      ...overrides,
+    });
+    const statusAnswer = (usable: boolean) => ({
+      ok: true,
+      action: "status",
+      apiVersion: API_VERSION,
+      certificate: certificateOf(usable),
+      nextStep: usable ? null : "先装证书",
+    });
+    const signAnswer = (usable: boolean) => ({
+      ok: true,
+      action: "sign",
+      apiVersion: API_VERSION,
+      signedCount: 1,
+      failedCount: 0,
+      items: [],
+      certificate: certificateOf(usable),
+      nextStep: null,
+    });
+    const store: { value: unknown } = { value: undefined };
+    let reads = 0;
+    let writes = 0;
+    const memory: CertificateCache = {
+      read: () => {
+        reads++;
+        return store.value;
+      },
+      write: (value) => {
+        writes++;
+        store.value = value === null ? undefined : value;
+      },
+    };
+    const scriptRequests: Record<string, unknown>[] = [];
+    let scriptAnswer: unknown = statusAnswer(true);
+    const scripted: SignerRunner = {
+      run: async (request) => {
+        scriptRequests.push(request);
+        return scriptAnswer;
+      },
+    };
+
+    const firstStatus = await route({ operation: "status" }, scripted, memory);
+    check(
+      "状态缓存：第一次 status 照常问脚本，结果原样交回，同时把「就绪」记下来",
+      scriptRequests.length === 1 && firstStatus === scriptAnswer && store.value !== undefined,
+    );
+    const recalled = (await route({ operation: "status" }, scripted, memory)) as {
+      ok: boolean;
+      action: string;
+      apiVersion: number;
+      certificate: Record<string, unknown>;
+      nextStep: unknown;
+      cached: boolean;
+      checkedAt: unknown;
+    };
+    check(
+      "状态缓存：证书就绪之后再 status，直接答「就绪」（cached: true、nextStep 为 null），脚本一次都没被叫",
+      scriptRequests.length === 1 &&
+        recalled.ok === true &&
+        recalled.action === "status" &&
+        recalled.cached === true &&
+        recalled.nextStep === null &&
+        recalled.certificate.usable === true &&
+        recalled.certificate.confirmedInstalled === true,
+    );
+    check(
+      "状态缓存：直接答的结果带上次的证书信息（名称 / 指纹 / 有效期）、接口版本，和一个能解析的记下的时间",
+      recalled.certificate.name === "测试根证书" &&
+        recalled.certificate.fingerprint === "AA:BB:CC" &&
+        recalled.certificate.expires === "2099-01-01" &&
+        recalled.apiVersion === API_VERSION &&
+        typeof recalled.checkedAt === "string" &&
+        !Number.isNaN(Date.parse(recalled.checkedAt)),
+    );
+    await route({ operation: "status", refresh: true }, scripted, memory);
+    await route({ operation: "status", refresh: "true" }, scripted, memory);
+    check(
+      "状态缓存：refresh（true 或 \"true\"）强制重问脚本，而且不把 refresh 转交给脚本",
+      scriptRequests.length === 3 && scriptRequests.every((request) => JSON.stringify(request) === '{"action":"status"}'),
+    );
+    await route({ operation: "status", refresh: false }, scripted, memory);
+    check("状态缓存：refresh 是 false 不算强制，照样直接答", scriptRequests.length === 3);
+
+    scriptAnswer = statusAnswer(false);
+    const notReady = await route({ operation: "status", refresh: true }, scripted, memory);
+    check("状态缓存：重问发现没就绪，结果原样交回，并清掉记着的「就绪」", notReady === scriptAnswer && store.value === undefined);
+    await route({ operation: "status" }, scripted, memory);
+    await route({ operation: "status" }, scripted, memory);
+    check("状态缓存：没就绪的状态不记，每次都真的问脚本", scriptRequests.length === 6);
+
+    scriptAnswer = signAnswer(true);
+    await route({ operation: "sign", paths: ["/a"] }, scripted, memory);
+    const afterSign = scriptRequests.length;
+    const statusAfterSign = (await route({ operation: "status" }, scripted, memory)) as { cached?: boolean };
+    check("状态缓存：sign 的结果里证书就绪，也会记下来，之后的 status 直接答", scriptRequests.length === afterSign && statusAfterSign.cached === true);
+    await route({ operation: "sign", paths: ["/a"] }, scripted, memory);
+    check("状态缓存：sign 每次都经脚本，不受缓存影响", scriptRequests.length === afterSign + 1);
+    scriptAnswer = signAnswer(false);
+    await route({ operation: "sign", paths: ["/a"] }, scripted, memory);
+    check("状态缓存：sign 的结果里证书没就绪，清掉记着的「就绪」", store.value === undefined);
+
+    // 记着的东西不可信就当没有：格式不对、不是「就绪」、证书已过期
+    const record = (patch: Record<string, unknown> = {}) => ({
+      apiVersion: API_VERSION,
+      certificate: certificateOf(true),
+      checkedAt: new Date().toISOString(),
+      ...patch,
+    });
+    const untrusted: unknown[] = [
+      "文本",
+      42,
+      true,
+      [],
+      {},
+      record({ apiVersion: "2" }),
+      record({ checkedAt: 1 }),
+      record({ certificate: null }),
+      record({ certificate: certificateOf(false) }),
+      record({ certificate: certificateOf(true, { expires: "2000-01-01" }) }),
+    ];
+    scriptAnswer = statusAnswer(false);
+    let ignored = true;
+    for (const value of untrusted) {
+      store.value = value;
+      const before = scriptRequests.length;
+      await route({ operation: "status" }, scripted, memory);
+      if (scriptRequests.length !== before + 1) ignored = false;
+    }
+    check(`状态缓存：记着的东西格式不对、不是「就绪」、证书已过期（共 ${untrusted.length} 种），都当没有，照常问脚本`, ignored);
+
+    const brokenStorage: CertificateCache = {
+      read: () => {
+        throw new Error("Storage 不可用");
+      },
+      write: () => {
+        throw new Error("Storage 不可用");
+      },
+    };
+    scriptAnswer = statusAnswer(true);
+    check(
+      "状态缓存：Storage 读写都出错也不影响主流程，照常问脚本、结果原样交回",
+      (await route({ operation: "status" }, scripted, brokenStorage)) === scriptAnswer,
+    );
+
+    store.value = record();
+    reads = 0;
+    writes = 0;
+    const requestsBefore = scriptRequests.length;
+    await route({ operation: "check", paths: ["/ws/最小有效.plist"] }, scripted, memory);
+    check("状态缓存：check 不碰缓存、也不叫脚本", reads === 0 && writes === 0 && scriptRequests.length === requestsBefore);
+    const launchFailed = await route({ operation: "status", refresh: true }, scriptDown, memory);
+    const identityFailed = await route(
+      { operation: "status", refresh: true },
+      { run: async () => ({ ok: false, apiVersion: API_VERSION, error: { type: "identity", message: "x" } }) },
+      memory,
+    );
+    check(
+      "状态缓存：问脚本失败（叫不起来、脚本报错）不碰记着的「就绪」",
+      launchFailed.ok === false && identityFailed.ok === false && store.value !== undefined && writes === 0,
     );
   } finally {
     if (savedFileManager === undefined) delete g.FileManager;

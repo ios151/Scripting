@@ -10,6 +10,7 @@
 
 - **写草稿、检查草稿**在技能自己里完成：`check` 用的是 `vendor/` 里带的一份检查器（和脚本里的逐字节相同），**不经过脚本**，所以脚本没装、版本旧也能用。
 - **签名、查证书状态**交给「快捷指令签名」脚本：`scripts/router.ts` 用 `Script.run` 调它的无界面 API（脚本里的 `kit/api.ts`，`status` / `sign`），把结果交回。签名身份在脚本自己的钥匙串里，技能读不到。
+- **证书确认就绪之后，`status` 不再启动脚本**：技能用自己的 `Storage` 记着「就绪」（`status` / `sign` 的结果里 `certificate.usable` 为 `true` 就记、不是就清），之后 `status` 直接答、结果里带 `"cached": true`；`"refresh": true` 强制重问一次。没就绪的状态每次都真的问脚本。起因是用户反馈：每次查证书状态都会弹出一个页面，配置好之后也一样。
 
 给 AI 看的完整说明在 [SKILL.md](SKILL.md)。
 
@@ -37,8 +38,8 @@ shortcut-signer/
 ├── skill.json                       图标和颜色
 ├── schema.json                      sign.ts 的参数 schema（status / check / sign）
 ├── scripts/
-│   ├── sign.ts                      调用入口，只接线
-│   ├── router.ts                    路由：check 留在本地，status / sign 交给脚本
+│   ├── sign.ts                      调用入口，只接线；用 Storage 记「证书已就绪」
+│   ├── router.ts                    路由：check 留在本地，status / sign 交给脚本；证书就绪后 status 直接答
 │   └── localCheck.ts                本地检查：读文件 → 读 plist → 检查器 → 整形
 ├── vendor/                          脚本里同名文件的逐字节副本（检查器及其依赖，共 7 个）
 │   ├── core/                        bytes / plist / check / read / report / names

@@ -8,7 +8,7 @@
       "type": "string",
       "enum": ["status", "check", "sign"],
       "default": "status",
-      "description": "status: 只读，查签名证书的状态（经「快捷指令签名」脚本）；check: 只读，签名前的结构检查（AI 写的草稿先查；在技能里本地跑，不需要脚本和证书）；sign: 给一个或多个快捷指令文件签名（经脚本）。开始前先 status。"
+      "description": "status: 只读，查签名证书的状态（经「快捷指令签名」脚本）；check: 只读，签名前的结构检查（AI 写的草稿先查；在技能里本地跑，不需要脚本和证书）；sign: 给一个或多个快捷指令文件签名（经脚本）。开始前先 status（证书确认就绪之后它直接答，不会再启动脚本）。"
     },
     "paths": {
       "type": "array",
@@ -29,6 +29,11 @@
       "type": "boolean",
       "default": false,
       "description": "check 用：严格模式，警告也当成错误（错误码加 strict_ 前缀）。"
+    },
+    "refresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "status 用：证书确认就绪之后，status 直接答「就绪」（结果里带 cached: true），不再去启动脚本；带 refresh: true 才重新问一次脚本。用户说他重新生成了证书、或你怀疑状态变了再用。"
     }
   },
   "allOf": [
