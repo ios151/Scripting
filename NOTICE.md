@@ -17,6 +17,7 @@
 | `设备工具箱/kit/airlift.ts`、`atc.ts`、`airbeep.ts` | 思路来自 @Waa404，实现为本项目重写（见下） |
 | `JavBus/` | 功能、接口与文案移植自 Nicked639 的 JSBox 脚本 JavBus 9.2，代码用 TypeScript 重写（见下） |
 | `快捷指令签名/` | 本项目独立实现，没有拷贝任何上游源码；签名流程参考了 0xilis 的格式研究（见下） |
+| `skills/shortcut-signer/` | 本项目原创；知识库里动作和参数的核对用到了公开资料，只引用事实、没有复制代码或数据（见下） |
 | `_selftest/` | 本项目原创 |
 | `dev-loopback/` | 本项目原创 |
 | `dts/` | **不在本仓库内**，属于 Scripting 应用作者 |
@@ -147,6 +148,25 @@ shortcut-sign 同为 MIT（Copyright (c) 2025 Snoolie Keffaber），许可文本
 
 写入端的验证用到了本机存的 24 个 Apple 官方签名的 `.shortcut`（多为他人作品），这些样本**不在本仓库内**。
 Apple、iOS、Shortcuts（快捷指令）是 Apple Inc. 的商标，本脚本与 Apple 无隶属关系。
+
+---
+
+## shortcut-signer 技能知识库的资料来源
+
+`skills/shortcut-signer/references/` 里的动作目录、参数值的写法和模板，文字是自己写的，示例里用的都是虚构的值。
+「某个动作有哪些参数键、取值有哪些」这类事实，对着下面这些来源核过；**没有复制它们的代码或数据文件**：
+
+| 来源 | 用来核对什么 | 许可 |
+|---|---|---|
+| [shortcuts-playground-plugin](https://github.com/viticci/shortcuts-playground-plugin)（Federico Viticci） | Apple 自己的动作参数表（iOS 27 / macOS 27 的 ToolKit 数据库）里的参数键和枚举取值 | MIT |
+| 公开仓库里真实导出的快捷指令（约 3400 个文本版文件） | 动作标识、参数键、值的形状 | 各自的作者；只统计事实，没有复制内容 |
+| [Cherri](https://github.com/electrikmilk/cherri) | 动作的定义，对照核对 | GPL-2.0；只核对事实，没有抄代码和表 |
+| [shortcuts-js](https://github.com/joshfarrant/shortcuts-js) | 同上 | GPL-3.0；同上 |
+| [ScPL](https://github.com/pfgithub/scpl) | 同上 | MIT |
+| [swift-shortcuts](https://github.com/a2/swift-shortcuts) | 同上 | MIT |
+
+结构检查器的规则和 `references/patterns.md` 里的写法模式，来自作者之前写的另一个快捷指令技能（作者自己的作品）。
+`references/scripting-intents.md` 是对 Scripting 自己那十个 App Intent 动作的观察记录，来自作者导出的快捷指令样本。
 
 ---
 

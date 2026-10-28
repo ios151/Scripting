@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["operation"],
+  "properties": {
+    "operation": {
+      "type": "string",
+      "enum": ["status", "check", "sign"],
+      "default": "status",
+      "description": "status: 只读，查签名证书的状态（经「快捷指令签名」脚本）；check: 只读，签名前的结构检查（AI 写的草稿先查；在技能里本地跑，不需要脚本和证书）；sign: 给一个或多个快捷指令文件签名（经脚本）。开始前先 status。"
+    },
+    "paths": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": { "type": "string" },
+      "description": "check / sign 用：文件的绝对路径。XML plist、二进制 plist 都行；已签名的 .shortcut 只有 sign 收（check 不收，直接 sign）。plist 先用 file_tool 写成文件再传路径，别把正文塞进命令行。"
+    },
+    "path": {
+      "type": "string",
+      "description": "check / sign 用：只有一个文件时的简写，和 paths 二选一。"
+    },
+    "outputDir": {
+      "type": "string",
+      "description": "sign 用：签好的 .shortcut 放哪，绝对路径的目录，不存在会创建，重名自动加序号、不覆盖。总是传当前工作区里的目录；不传就写到临时目录，那里的文件可能被清掉。"
+    },
+    "strict": {
+      "type": "boolean",
+      "default": false,
+      "description": "check 用：严格模式，警告也当成错误（错误码加 strict_ 前缀）。"
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "operation": { "enum": ["check", "sign"] } }, "required": ["operation"] },
+      "then": { "anyOf": [{ "required": ["paths"] }, { "required": ["path"] }] }
+    }
+  ]
+}

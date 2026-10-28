@@ -28,7 +28,8 @@
     "WLOC 虚拟定位",
     "设备工具箱",
     "JavBus",
-    "快捷指令签名"
+    "快捷指令签名",
+    "skills/shortcut-signer"
   ],
   "exclude": [
     "./dts/scripting.d.ts"

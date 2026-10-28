@@ -38,6 +38,25 @@
 
 ---
 
+## AI 技能
+
+给 Scripting 里的 AI 助手用的「技能」，放在 [skills/](skills/)。技能不是脚本，导入的地方不一样，上面那些一键安装链接装不了它。
+
+| 技能 | 做什么 | 要求 | 安装 |
+|---|---|---|---|
+| **[shortcut-signer](skills/shortcut-signer)** | 搭配上面的「快捷指令签名」：让 AI 查着知识库写快捷指令草稿、做结构检查，再调用脚本在手机本机签名，聊天里给出「导入」卡片。详见[文档](docs/快捷指令签名.md#给-scripting-里的-ai-用) | 先装「快捷指令签名」脚本，并装好、信任证书 | [⬇️ 一键导入](https://scripting.fun/import_skills?urls=%5B%22https%3A%2F%2Fgithub.com%2Fios151%2FScripting%2Ftree%2Fmain%2Fskills%2Fshortcut-signer%22%5D) · [⬇️ 直接下载 zip](https://raw.githubusercontent.com/ios151/Scripting/main/dist/ShortcutSignerSkill.zip) |
+
+一键导入用的是 Scripting 官方的技能导入链接：
+
+```
+https://scripting.fun/import_skills?urls=<URL 编码的 JSON 数组>
+```
+
+数组里放技能文件夹的 GitHub `tree` 地址（本仓库的技能在 `skills/<名字>`）。zip 是同一个文件夹打的包，
+里面是一层 `<技能名>/` 目录，方便直接下载后导入；`build-release.py` 打包时顺带生成，放在 `dist/`。
+
+---
+
 ## 怎么装
 
 **必须在 iPhone / iPad 上用 Safari 打开安装链接**，会直接唤起 Scripting 导入。
@@ -70,7 +89,8 @@ npx -y -p typescript@5.6 tsc --noEmit -p tsconfig.json
 # 自测，脱机可跑，不需要设备
 npx -y tsx _selftest/<某一组>.test.ts
 
-# 打包：遍历仓库根下每个带 script.json 的目录，打成 dist/<名字>.zip
+# 打包：遍历仓库根下每个带 script.json 的目录，打成 dist/<名字>.zip；
+# skills/ 下每个带 SKILL.md 的技能目录也一并打成 zip（根上多一层 <技能名>/，和脚本的相反）
 python build-release.py
 ```
 
