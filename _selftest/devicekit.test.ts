@@ -5,7 +5,7 @@
 
 import { encodeBplist, PReal } from "../设备工具箱/core/bplist";
 import { utf8 } from "../设备工具箱/core/bytes";
-import { PlistServiceClient, LockdownServiceError, fromNative } from "../设备工具箱/kit/lockdown";
+import { PlistServiceClient, LockdownServiceError, fromNative, isNativeParseFailure } from "../设备工具箱/kit/lockdown";
 import { decodePlist, decodeXmlPlist, encodeXmlPlist, isPlistDict } from "../设备工具箱/kit/plist";
 import {
   collectBundleIds,
@@ -1006,15 +1006,66 @@ async function main() {
     check("小于 1 MB 显示成 KB", formatBytes(500_000) === "500 KB");
     check("认得出 Scripting 自己", isScriptingItself({ ...apps[0], name: "Scripting" }) && !isScriptingItself(apps[0]));
 
-    const appsCall = scriptedSession(() => ({ LookupResult: lookup, Status: "Complete" }));
+    // 列表分两步取：先只要 ID，再按 50 个一组取基本信息。原生层单条回包最多 16384 个节点，一次取千把个 App 会超限。
+    // 假设备按请求里的 BundleIDs 和 ReturnAttributes 回。
+    const lookupDevice = (all: Message) => (message: Message): PlistValue => {
+      const requested = isPlistDict(message.ClientOptions) ? message.ClientOptions : {};
+      const wanted = Array.isArray(requested.BundleIDs) ? (requested.BundleIDs as string[]) : Object.keys(all);
+      const attributes = Array.isArray(requested.ReturnAttributes) ? (requested.ReturnAttributes as string[]) : null;
+      const result: Message = {};
+      for (const id of wanted) {
+        const value = all[id];
+        if (!isPlistDict(value)) continue;
+        result[id] = attributes ? Object.fromEntries(attributes.filter((key) => key in value).map((key) => [key, value[key]])) : value;
+      }
+      return { Status: "Complete", LookupResult: result };
+    };
+    const appsCall = scriptedSession(lookupDevice(lookup as Message));
     const read = await readApps(appsCall.session);
-    const lookupSent = appsCall.sent[0];
-    const options = isPlistDict(lookupSent.ClientOptions) ? lookupSent.ClientOptions : {};
-    check("Lookup 只要用户 App", lookupSent.Command === "Lookup" && options.ApplicationType === "User" && read.length === 3);
+    const idRequest = appsCall.sent[0];
+    const idOptions = isPlistDict(idRequest.ClientOptions) ? idRequest.ClientOptions : {};
+    check(
+      "第一条 Lookup 只要用户 App 的 Bundle ID",
+      idRequest.Command === "Lookup" && idOptions.ApplicationType === "User" &&
+        Array.isArray(idOptions.ReturnAttributes) && idOptions.ReturnAttributes.join(",") === "CFBundleIdentifier" && idOptions.BundleIDs === undefined,
+    );
+    const detailRequest = appsCall.sent[1];
+    const options = isPlistDict(detailRequest.ClientOptions) ? detailRequest.ClientOptions : {};
+    check("第二条按 Bundle ID 取基本信息，一共解析出 3 个", detailRequest.Command === "Lookup" && options.ApplicationType === "User" && Array.isArray(options.BundleIDs) && read.length === 3);
     check(
       "列表的 Lookup 不要占用空间（真机上带着它十几秒不回包）",
       Array.isArray(options.ReturnAttributes) && options.ReturnAttributes.includes("Entitlements") && !options.ReturnAttributes.includes("StaticDiskUsage"),
     );
+
+    // 1240 个 App（2026-10-31 用户反馈的真实数量）：每条回包都不超过一组，合起来一个不少
+    const many: Message = {};
+    for (let index = 0; index < 1240; index++) {
+      const id = `com.example.many${index}`;
+      many[id] = { CFBundleIdentifier: id, CFBundleDisplayName: `应用${index}`, SignerIdentity: APPLE, Entitlements: { "application-identifier": `TEAM123456.${id}` } };
+    }
+    const manyCall = scriptedSession(lookupDevice(many));
+    const manyStatus: string[] = [];
+    const manyRead = await readApps(manyCall.session, (status) => manyStatus.push(status));
+    const batchSizes = manyCall.sent.slice(1).map((message) => {
+      const batchOptions = isPlistDict(message.ClientOptions) ? message.ClientOptions : {};
+      return Array.isArray(batchOptions.BundleIDs) ? batchOptions.BundleIDs.length : -1;
+    });
+    check("1240 个 App 一个不少", manyRead.length === 1240, String(manyRead.length));
+    check(
+      "先 1 条要 ID，再 25 组、每组最多 50 个",
+      manyCall.sent.length === 26 && Math.max(...batchSizes) === 50 && batchSizes.reduce((sum, count) => sum + count, 0) === 1240,
+      `${manyCall.sent.length} / ${batchSizes.join(",")}`,
+    );
+    check("分批读取时回报进度，最后到 1240/1240", manyStatus[manyStatus.length - 1] === "读取应用信息 1240/1240…", manyStatus[manyStatus.length - 1]);
+    check("分批没有弄丢单个 App 的信息", manyRead.some((app) => app.bundleId === "com.example.many1239" && app.source === "appStore" && app.teamId === "TEAM123456"));
+
+    // 原生层解不动回包的两种报错都要触发裸帧退路（session.withService 靠它判断）
+    check("原生解不动：参数校验报错（电池那棵树）", isNativeParseFailure(new Error("x 接收失败：name=Error message=Invalid device service argument. code=ERR_INVALID_ARG_VALUE")));
+    check(
+      "原生解不动：回包超限（1240 个 App 一次 Lookup 的真机报错）",
+      isNativeParseFailure(new Error("com.apple.mobile.installation_proxy.shim.remote 接收失败：name=Error message=Invalid or truncated device service response. code=ERR_DEVICE_PROTOCOL line=7 column=66")),
+    );
+    check("别的错误不算原生解不动", !isNativeParseFailure(new Error("连接已被对端关闭")) && !isNativeParseFailure(new Error("x 响应超时 code=ERR_DEVICE_TIMEOUT")));
 
     // 占用空间：按 bundle ID 分组 Lookup，假设备按请求里的 BundleIDs 回大小
     const ids = Array.from({ length: 25 }, (_, index) => `com.example.app${index}`);

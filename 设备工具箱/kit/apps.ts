@@ -7,7 +7,7 @@
 // 占用空间（StaticDiskUsage / DynamicDiskUsage）要写进 ReturnAttributes 才有，但设备得把每个 App
 // 的数据目录现算一遍。真机实测（152 个 App）：不带大小的 Lookup 70 ms；带大小用 Browse 一次取完
 // 要 31.6 s，而且是一个个算、十个一批陆续回来的。所以分两步：
-// - 先不带大小 Lookup，列表马上出来；
+// - 先不带大小 Lookup（也是分批取，原因见 `readApps`），列表马上出来；
 // - 大小按 bundle ID 十个一组，分几路连接并发 Lookup，回来一组填一组；算完存一份缓存，
 //   下次进页先显示上次的数，后台再刷新。
 
@@ -188,21 +188,50 @@ export function appListText(apps: AppEntry[]): string {
     .join("\n");
 }
 
-/** 应用列表，不带占用空间（见文件头）。大小用 readAppSizes 另取。 */
+/**
+ * 列表分批取：每批 Lookup 带几个 App 的基本信息。
+ *
+ * 原生 plist 层单条回包最多 16384 个节点（DeviceServices 文档）。带 Entitlements 的一个 App 占二三十个，
+ * 一次 Lookup 取一千多个 App 会超限，报 `ERR_DEVICE_PROTOCOL: Invalid or truncated device service response`
+ * （2026-10-31 一位 1240 个 App 的 27.0.1 用户反馈；旧版自己拼帧没有这个上限，所以没事）。
+ * 分批以后每条回包只有一千来个节点，App 再多也撞不上。一批取 50 个：一批里有个别 Entitlements 特别长的 App 也有
+ * 余量（要平均每个 App 三百多个节点才会超），而这一步一旦在中途失败，原生退路就用不上了（已发过不止一条请求）。
+ */
+const LIST_CHUNK = 50;
+
+/**
+ * 应用列表，不带占用空间（见文件头）。大小用 readAppSizes 另取。
+ *
+ * 分两步：先只要 Bundle ID（每个 App 才两三个节点），再按 `LIST_CHUNK` 个一组取基本信息。
+ */
 export async function readApps(session: DeviceSession, report: (status: string) => void = () => {}): Promise<AppEntry[]> {
-  const response = await session.withService(INSTALLATION_PROXY_SERVICE, async (client) => {
+  const result = await session.withService(INSTALLATION_PROXY_SERVICE, async (client) => {
     report("读取应用列表…");
     const started = Date.now();
-    debugLog("apps", "Lookup 已发出");
-    const reply = await client.request(
-      { Command: "Lookup", ClientOptions: { ApplicationType: "User", ReturnAttributes: BASIC_ATTRIBUTES } },
+    const idReply = await client.request(
+      { Command: "Lookup", ClientOptions: { ApplicationType: "User", ReturnAttributes: ["CFBundleIdentifier"] } },
       30000,
     );
-    debugLog("apps", `Lookup 回包 ${Date.now() - started} ms，字段：${Object.keys(reply).join(", ")}`);
-    return reply;
+    if (!isPlistDict(idReply.LookupResult)) throw new Error("设备没有返回应用列表");
+    const ids = Object.keys(idReply.LookupResult);
+    debugLog("apps", `Lookup（只要 ID）回包 ${Date.now() - started} ms，${ids.length} 个`);
+
+    const merged: PlistDict = {};
+    for (let offset = 0; offset < ids.length; offset += LIST_CHUNK) {
+      const reply = await client.request(
+        {
+          Command: "Lookup",
+          ClientOptions: { ApplicationType: "User", BundleIDs: ids.slice(offset, offset + LIST_CHUNK), ReturnAttributes: BASIC_ATTRIBUTES },
+        },
+        30000,
+      );
+      if (isPlistDict(reply.LookupResult)) Object.assign(merged, reply.LookupResult);
+      if (ids.length > LIST_CHUNK) report(`读取应用信息 ${Math.min(offset + LIST_CHUNK, ids.length)}/${ids.length}…`);
+    }
+    debugLog("apps", `Lookup 分 ${Math.ceil(ids.length / LIST_CHUNK)} 批取完，共 ${Date.now() - started} ms`);
+    return merged;
   });
-  if (!isPlistDict(response.LookupResult)) throw new Error("设备没有返回应用列表");
-  const apps = parseApps(response.LookupResult);
+  const apps = parseApps(result);
   debugLog("apps", `解析出 ${apps.length} 个 App`);
   return apps;
 }

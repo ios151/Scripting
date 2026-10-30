@@ -11,7 +11,7 @@
 | 脚本 | 做什么 | 当前版本 | 要求 | 安装 |
 |---|---|---|---|---|
 | **[WLOC 虚拟定位](docs/WLOC.md)** | 用苹果官方开发者接口模拟本机定位，与 Xcode 的 Simulate Location 同一套机制 | 2.7.5 | iOS 27+ · Scripting 3.3.0+ · 开发者模式 | [⬇️ 一键安装](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FWLOC.zip%22%5D) |
-| **[设备工具箱](docs/设备工具箱.md)** | 走同一条开发者通道管本机：设备信息、电池健康、主屏布局、应用管理、配置描述文件、签名诊断、实时性能、硬件规格、通话录音提示音 | 2.1.1 | iOS 27+ · TestFlight 版 Scripting · 开发者模式 | [⬇️ 一键安装](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FDeviceToolbox.zip%22%5D) |
+| **[设备工具箱](docs/设备工具箱.md)** | 走同一条开发者通道管本机：设备信息、电池健康、主屏布局、应用管理、配置描述文件、签名诊断、实时性能、硬件规格、通话录音提示音 | 2.1.2 | iOS 27+ · TestFlight 版 Scripting · 开发者模式 | [⬇️ 一键安装](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FDeviceToolbox.zip%22%5D) |
 | **[JavBus](docs/JavBus.md)** | JavBus 非官方客户端（移植自 JSBox 脚本 JavBus 9.2）：检索、女优与分类、收藏、磁链、预览与字幕、推荐（网友推荐走社区推荐服务）。含成人内容 | 1.2.0 | Scripting 3.3.0+ · 能访问 javbus.com · 18+ | [⬇️ 一键安装](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FJavBus.zip%22%5D) |
 | **[快捷指令签名](docs/快捷指令签名.md)** | 在手机本机给快捷指令签名：自己生成根证书，装上并信任后，签出能直接导入的 `.shortcut`；不要服务器、不要 Mac、不靠第三方签名服务。带分享面板入口，也能被别的脚本调用（含结构检查） | 0.1.0 | Scripting 3.3.0+ · 只在 iOS 27.2 上验证过 · 手机上要装并信任一张自己生成的证书 | [⬇️ 一键安装](https://www.scripting.fun/import_scripts/?urls=%5B%22https%3A%2F%2Fraw.githubusercontent.com%2Fios151%2FScripting%2Fmain%2Fdist%2FShortcutSigner.zip%22%5D) |
 

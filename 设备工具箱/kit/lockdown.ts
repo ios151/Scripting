@@ -135,15 +135,21 @@ export interface PlistClient {
 }
 
 /**
- * 原生 plist 层**解不动回包**时报的那种错。
+ * 原生 plist 层**解不动回包**时报的两种错，碰上就换裸帧重来：
  *
- * 2026-10-19 真机：电池那棵树（IOPMPowerSource / AppleSmartBattery）一问就抛
- * `Invalid device service argument` / `ERR_INVALID_ARG_VALUE`，签到成功、5 毫秒就抛，
- * 设备根本没来得及传数据。同一个请求换成自己拼帧、自己 `decodePlist` 就正常——
- * 公开仓库里迁到原生层之前的版本一直是好的。
+ * ① `Invalid device service argument` / `ERR_INVALID_ARG_VALUE`——2026-10-19 真机：电池那棵树
+ * （IOPMPowerSource / AppleSmartBattery）一问就抛，签到成功、5 毫秒就抛，设备根本没来得及传数据。
+ *
+ * ② `Invalid or truncated device service response` / `ERR_DEVICE_PROTOCOL`——2026-10-31 一位
+ * 1240 个 App 的 27.0.1 用户：一次 Lookup 的回包超出原生层的上限（单条最多 16384 个节点、
+ * 一帧最大 8 MiB，见 DeviceServices 文档），原生层拒收并关掉连接。
+ *
+ * 两种换成自己拼帧、自己 `decodePlist` 都正常——公开仓库里迁到原生层之前的版本一直是好的。
  */
 export function isNativeParseFailure(error: unknown): boolean {
-  return /ERR_INVALID_ARG_VALUE|Invalid device service argument/i.test(describeError(error));
+  return /ERR_INVALID_ARG_VALUE|Invalid device service argument|ERR_DEVICE_PROTOCOL|Invalid or truncated device service response/i.test(
+    describeError(error),
+  );
 }
 
 /** `send` / `receive` 之上的那几个组合，两个后端共用，别各写一遍。 */

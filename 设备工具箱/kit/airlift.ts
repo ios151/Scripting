@@ -168,9 +168,18 @@ function baseName(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
 }
 
+/**
+ * `path` 相对 `base` 的 POSIX 相对路径。资产 id 全靠它算，算错一级就读写到别的目录去。
+ *
+ * **切出来的空段要丢掉**：`"…/Book/".split("/")` 末尾会多一个空串，被当成一级目录，
+ * 于是多退一个 `..`——目标就从 `/var/mobile/` 滑到 `/var/`。连续斜杠同理。
+ * 现在的调用方（常量 `AIRLOCK_ROOT` 和 `parentOf()` 的结果）都不带尾斜杠，碰不到这个，
+ * 但这种事不该靠调用方小心。
+ */
 function posixRel(path: string, base: string): string {
-  const pathParts = stripLeadingSlash(path).split("/");
-  const baseParts = stripLeadingSlash(base).split("/");
+  const segments = (value: string) => stripLeadingSlash(value).split("/").filter((part) => part.length > 0);
+  const pathParts = segments(path);
+  const baseParts = segments(base);
   let common = 0;
   while (common < pathParts.length && common < baseParts.length && pathParts[common] === baseParts[common]) common++;
   const parts: string[] = [];
