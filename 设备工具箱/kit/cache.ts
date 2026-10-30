@@ -52,6 +52,77 @@ export async function saveCachedIcons(icons: Map<string, Uint8Array>): Promise<v
   debugLog("cache", `图标缓存写入 ${icons.size} 个`);
 }
 
+// ── 取图标的统一流程 ──────────────────────────────────────────────────────
+
+/** 缓存的读写。默认走文件；自测里换成内存里的假货。 */
+export interface IconCacheIO {
+  load(bundleIds: string[]): Promise<Map<string, Uint8Array>>;
+  save(icons: Map<string, Uint8Array>): Promise<void>;
+}
+
+const fileIconCache: IconCacheIO = { load: loadCachedIcons, save: saveCachedIcons };
+
+/** 去设备上取缺的图标：进度和「每取够一批」都要回报，返回取到的全部。 */
+export type IconFetcher = (
+  missing: string[],
+  onProgress: (done: number, total: number) => void,
+  onBatch: (batch: Map<string, Uint8Array>) => void,
+) => Promise<Map<string, Uint8Array>>;
+
+export interface IconLoadHooks {
+  /** 缓存里命中的，一次交出。 */
+  onCached?: (icons: Map<string, Uint8Array>) => void;
+  /** 从设备取到的，每取够一批交一次。 */
+  onFetched?: (batch: Map<string, Uint8Array>) => void;
+  /** 只算缺的那几个：已取几个 / 一共要取几个。 */
+  onProgress?: (done: number, total: number) => void;
+}
+
+/**
+ * 图标：先摆缓存里的，再只去设备上取缺的，取一批铺一批、存一批。
+ *
+ * 应用管理和主屏布局共用这一个流程、同一个缓存目录——谁先载过，另一边就不用再等。
+ * 取图标要不要保活、怎么拿会话是页面的事，由 `fetchMissing` 带进来。
+ *
+ * **每取到一批就存**，不等全取完：几百个图标要十几秒，中途锁屏、隧道断掉很常见，
+ * 全取完才存的话断在九成等于白取；现在断了也留着已经取到的，下次只补剩下的。
+ * `refresh` 为真时不读缓存、全部重取（应用管理右上角「重新载入」）。
+ */
+export async function loadIconsWithCache(
+  bundleIds: string[],
+  fetchMissing: IconFetcher,
+  hooks: IconLoadHooks = {},
+  options: { refresh?: boolean; cache?: IconCacheIO } = {},
+): Promise<{ cached: number; fetched: number }> {
+  const cache = options.cache ?? fileIconCache;
+  const cached = options.refresh ? new Map<string, Uint8Array>() : await cache.load(bundleIds);
+  if (cached.size > 0) hooks.onCached?.(cached);
+  const missing = bundleIds.filter((id) => !cached.has(id));
+  if (missing.length === 0) return { cached: cached.size, fetched: 0 };
+
+  hooks.onProgress?.(0, missing.length);
+  const saves: Promise<void>[] = [];
+  const delivered = new Set<string>();
+  const deliver = (batch: Map<string, Uint8Array>) => {
+    for (const id of batch.keys()) delivered.add(id);
+    saves.push(cache.save(batch).catch((error) => debugLog("cache", "图标缓存写不进", describeError(error))));
+    hooks.onFetched?.(batch);
+  };
+  try {
+    const fetched = await fetchMissing(
+      missing,
+      (done, total) => hooks.onProgress?.(done, total),
+      deliver,
+    );
+    // 取图标的函数没分批交出来的（不是每个实现都分批），这里补交、补存
+    const rest = new Map([...fetched].filter(([id]) => !delivered.has(id)));
+    if (rest.size > 0) deliver(rest);
+    return { cached: cached.size, fetched: fetched.size };
+  } finally {
+    await Promise.allSettled(saves);
+  }
+}
+
 // ── 登记：所有缓存都在这张表里 ────────────────────────────────────────────
 
 /** 存在 Storage 里的缓存键。只登记「重算得出来」的，用户设置不算缓存。 */

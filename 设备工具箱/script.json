@@ -9,7 +9,7 @@
     "zh": "用苹果开发者通道管理本机：设备信息、电池健康、主屏布局、应用管理、配置描述文件、签名检查与到期、实时性能、系统事件、硬件规格、通话录音提示音，以及重启 / 关机",
     "en": "Manage this iPhone via Apple developer services: device info, battery health, Home Screen layout, apps, configuration profiles, code-signing diagnosis, live CPU/memory, system events, hardware specs, call-recording chime, restart / shut down"
   },
-  "version": "2.1.2",
+  "version": "2.1.3",
   "author": {
     "name": "ios151",
     "email": null,

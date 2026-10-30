@@ -22,6 +22,7 @@ import {
   type VirtualNode,
 } from "scripting";
 import { debugLog, describeError } from "../core/debug";
+import { loadIconsWithCache } from "../kit/cache";
 import { deviceHub } from "../kit/hub";
 import { fileStamp } from "../kit/dates";
 import { encodeXmlPlist } from "../kit/plist";
@@ -33,6 +34,7 @@ import {
   type HomeItem,
   type HomeLayout,
 } from "../kit/services";
+import { withKeepAlive } from "../utils/keepalive";
 import { copyWithFeedback, TaskStateSection, useDeviceTask } from "./common";
 import { DockEditPage } from "./DockEditPage";
 import { OrganizePage } from "./OrganizePage";
@@ -230,6 +232,8 @@ function WallpaperCell({
 export function HomeScreenPage() {
   const [icons, setIcons] = useState<IconMap>(new Map());
   const [iconProgress, setIconProgress] = useState("");
+  /** 图标正在载入时挡掉第二次（重读布局会再触发一遍，同一批缺的图标不用取两回）。 */
+  const iconsBusy = useRef(false);
   const [wallpapers, setWallpapers] = useState<{ home: Wallpaper | null; lock: Wallpaper | null } | null>(null);
   const [wallpaperLoading, setWallpaperLoading] = useState(false);
   /** 同一帧里连点两下时状态还没刷新，靠 ref 挡掉第二次（真机日志里出现过一次连载两遍）。 */
@@ -241,22 +245,43 @@ export function HomeScreenPage() {
   const setOpen = (id: string, open: boolean) =>
     setOpenGroups((list) => (open ? (list.includes(id) ? list : [...list, id]) : list.filter((item) => item !== id)));
 
+  /**
+   * 图标：先摆缓存里的，再只去设备上取缺的，取一批铺一批。
+   *
+   * 和应用管理共用同一个图标缓存（`kit/cache.ts`），所以应用管理载过的这里直接有，
+   * 这里载过的（含系统 App）下次也不用再取。以前每次进来都把一两百个图标逐个重取一遍，
+   * 要等十几秒，期间整页灰方块。
+   */
   async function loadIcons(layout: HomeLayout) {
     const ids = collectBundleIds(layout);
-    if (ids.length === 0) return;
+    if (ids.length === 0 || iconsBusy.current) return;
+    iconsBusy.current = true;
+    const addImages = (pngs: Map<string, Uint8Array>) =>
+      setIcons((current) => {
+        const next: IconMap = new Map(current);
+        for (const [id, png] of pngs) {
+          const image = toImage(png);
+          if (image) next.set(id, image);
+        }
+        return next;
+      });
     try {
-      const session = await deviceHub.get();
-      const pngs = await readIcons(session, ids, (done, total) => setIconProgress(`载入图标 ${done}/${total}`));
-      const map: IconMap = new Map();
-      for (const [id, png] of pngs) {
-        const image = toImage(png);
-        if (image) map.set(id, image);
-      }
-      setIcons(map);
+      await loadIconsWithCache(
+        ids,
+        // 缓存是空的时候要逐个取十几秒，这期间切走不保活就断在半路
+        (missing, onProgress, onBatch) =>
+          withKeepAlive("home-icons", async () => readIcons(await deviceHub.get(), missing, onProgress, onBatch)),
+        {
+          onCached: addImages,
+          onProgress: (done, total) => setIconProgress(`载入图标 ${done}/${total}`),
+          onFetched: addImages,
+        },
+      );
     } catch (error) {
       setMessage(`图标没取全：${describeError(error)}`);
     } finally {
       setIconProgress("");
+      iconsBusy.current = false;
     }
   }
 

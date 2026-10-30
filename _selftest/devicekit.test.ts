@@ -5,7 +5,8 @@
 
 import { encodeBplist, PReal } from "../设备工具箱/core/bplist";
 import { utf8 } from "../设备工具箱/core/bytes";
-import { PlistServiceClient, LockdownServiceError, fromNative, isNativeParseFailure } from "../设备工具箱/kit/lockdown";
+import type { ByteStream } from "../设备工具箱/core/stream";
+import { PlistServiceClient, LockdownServiceError, RawPlistClient, fromNative, isNativeParseFailure } from "../设备工具箱/kit/lockdown";
 import { decodePlist, decodeXmlPlist, encodeXmlPlist, isPlistDict } from "../设备工具箱/kit/plist";
 import {
   collectBundleIds,
@@ -114,7 +115,7 @@ import { parseCertTime, parseCertificate } from "../设备工具箱/kit/x509";
 import { clockLabel, clockOffsetDays, isClockShifted, resetClock, shiftClock, simulatedNow } from "../设备工具箱/kit/testClock";
 import { entitlementsOf, readAppDetail, urlSchemes } from "../设备工具箱/kit/apps";
 import { deviceHub } from "../设备工具箱/kit/hub";
-import { cacheSizeText, totalCacheBytes } from "../设备工具箱/kit/cache";
+import { cacheSizeText, loadIconsWithCache, totalCacheBytes, type IconCacheIO, type IconFetcher } from "../设备工具箱/kit/cache";
 import {
   clearStoreLinkCache,
   countriesFor,
@@ -931,6 +932,103 @@ async function main() {
     check("只收选中页文件夹里的 App（不含网页快捷方式）", ids === "z,j,a,b", ids);
   }
 
+  console.log("图标缓存流程（应用管理和主屏布局共用）");
+  {
+    type Icons = Map<string, Uint8Array>;
+    const png = (seed: number) => new Uint8Array([seed, seed + 1, seed + 2]);
+    /** 内存里的缓存假货：记下 save 被叫了几次。 */
+    function memoryCache(initial: string[] = []) {
+      const store: Icons = new Map(initial.map((id, index) => [id, png(index)]));
+      let saves = 0;
+      const io: IconCacheIO = {
+        load: async (ids) => new Map(ids.filter((id) => store.has(id)).map((id) => [id, store.get(id) as Uint8Array])),
+        save: async (icons) => {
+          saves++;
+          for (const [id, bytes] of icons) store.set(id, bytes);
+        },
+      };
+      return { io, store, saves: () => saves };
+    }
+    /** 假取图标：按传入顺序取，每 2 个交一批；`failAtIndex` 指定取到第几个时抛错，`batchless` 不分批只在最后返回。 */
+    function fakeFetch(options: { failAtIndex?: number; batchless?: boolean } = {}) {
+      const asked: string[][] = [];
+      const fetch: IconFetcher = async (missing, onProgress, onBatch) => {
+        asked.push([...missing]);
+        const all: Icons = new Map();
+        let pending: Icons = new Map();
+        for (let index = 0; index < missing.length; index++) {
+          if (index === options.failAtIndex) throw new Error("隧道断了");
+          all.set(missing[index], png(100 + index));
+          pending.set(missing[index], png(100 + index));
+          onProgress(index + 1, missing.length);
+          if (!options.batchless && pending.size >= 2) {
+            onBatch(pending);
+            pending = new Map();
+          }
+        }
+        if (!options.batchless && pending.size > 0) onBatch(pending);
+        return all;
+      };
+      return { fetch, asked };
+    }
+    function recorder() {
+      const cachedGot: string[][] = [];
+      const fetchedGot: string[][] = [];
+      const progress: string[] = [];
+      return {
+        cachedGot,
+        fetchedGot,
+        progress,
+        hooks: {
+          onCached: (icons: Icons) => cachedGot.push([...icons.keys()]),
+          onFetched: (icons: Icons) => fetchedGot.push([...icons.keys()]),
+          onProgress: (done: number, total: number) => progress.push(`${done}/${total}`),
+        },
+      };
+    }
+    const all5 = ["a", "b", "c", "d", "e"];
+
+    const hit = memoryCache(["a", "b", "c"]);
+    const hitFetch = fakeFetch();
+    const hitSeen = recorder();
+    const hitResult = await loadIconsWithCache(["a", "b", "c"], hitFetch.fetch, hitSeen.hooks, { cache: hit.io });
+    check("全在缓存里：不去设备上取，缓存一次交出", hitFetch.asked.length === 0 && hitSeen.cachedGot.length === 1 && hitSeen.cachedGot[0].join() === "a,b,c" && hitResult.fetched === 0 && hitResult.cached === 3);
+    check("全在缓存里：不报进度、不写缓存", hitSeen.progress.length === 0 && hit.saves() === 0);
+
+    const part = memoryCache(["a", "c"]);
+    const partFetch = fakeFetch();
+    const partSeen = recorder();
+    const partResult = await loadIconsWithCache(all5, partFetch.fetch, partSeen.hooks, { cache: part.io });
+    check("只去取缺的，顺序照传进来的", partFetch.asked.length === 1 && partFetch.asked[0].join() === "b,d,e", partFetch.asked.join("|"));
+    check("缓存命中的先交出，设备上取的按批交出", partSeen.cachedGot[0].join() === "a,c" && partSeen.fetchedGot.map((batch) => batch.join()).join("|") === "b,d|e", JSON.stringify(partSeen.fetchedGot));
+    check("进度只算缺的那几个，从 0 数到满", partSeen.progress[0] === "0/3" && partSeen.progress[partSeen.progress.length - 1] === "3/3", partSeen.progress.join(","));
+    check("取到一批存一批，最后缓存里五个都有", part.saves() === 2 && part.store.size === 5 && partResult.cached === 2 && partResult.fetched === 3, `${part.saves()} / ${part.store.size}`);
+
+    const again = await loadIconsWithCache(all5, fakeFetch().fetch, {}, { cache: part.io });
+    check("再进一次：全部命中，一个都不用取", again.cached === 5 && again.fetched === 0);
+
+    const fresh = memoryCache(all5);
+    const freshFetch = fakeFetch();
+    const freshSeen = recorder();
+    await loadIconsWithCache(all5, freshFetch.fetch, freshSeen.hooks, { cache: fresh.io, refresh: true });
+    check("重新载入：不看缓存，全部重取", freshFetch.asked[0].join() === all5.join() && freshSeen.cachedGot.length === 0);
+
+    const broken = memoryCache();
+    const brokenFetch = fakeFetch({ failAtIndex: 3 });
+    const brokenError = await rejects(loadIconsWithCache(all5, brokenFetch.fetch, {}, { cache: broken.io }));
+    check("取到一半隧道断了：错误照样抛出去", brokenError instanceof Error && brokenError.message === "隧道断了");
+    check(
+      "断之前交出来的那一批已经存下了，下次只补剩下的",
+      broken.store.has("a") && broken.store.has("b") && !broken.store.has("c") && !broken.store.has("d"),
+      [...broken.store.keys()].join(),
+    );
+
+    const flat = memoryCache();
+    const flatSeen = recorder();
+    await loadIconsWithCache(all5, fakeFetch({ batchless: true }).fetch, flatSeen.hooks, { cache: flat.io });
+    check("取图标的函数不分批：最后补交一次、补存一次", flatSeen.fetchedGot.length === 1 && flatSeen.fetchedGot[0].join() === all5.join() && flat.saves() === 1 && flat.store.size === 5);
+  }
+
   console.log("应用管理 / 描述文件 / 电源");
   {
     type Message = Record<string, PlistValue>;
@@ -1066,6 +1164,53 @@ async function main() {
       isNativeParseFailure(new Error("com.apple.mobile.installation_proxy.shim.remote 接收失败：name=Error message=Invalid or truncated device service response. code=ERR_DEVICE_PROTOCOL line=7 column=66")),
     );
     check("别的错误不算原生解不动", !isNativeParseFailure(new Error("连接已被对端关闭")) && !isNativeParseFailure(new Error("x 响应超时 code=ERR_DEVICE_TIMEOUT")));
+
+    // 裸帧后端自己攒包，不受原生那层 8 MiB 上限的限制（2026-10-31：misagent 的 CopyAll 一次回了 17178553 字节）。
+    // 假隧道每次最多给 16 KB，和真机一样。
+    const framedStream = (body: Uint8Array): ByteStream => {
+      const frame = new Uint8Array(4 + body.length);
+      new DataView(frame.buffer).setUint32(0, body.length, false);
+      frame.set(body, 4);
+      let at = 0;
+      return {
+        read: async (max) => {
+          if (at >= frame.length) return null;
+          const size = Math.min(max, frame.length - at);
+          const out = frame.slice(at, at + size);
+          at += size;
+          return out;
+        },
+        write: async () => {},
+        close: async () => {},
+      };
+    };
+    const smallReply = await new RawPlistClient(framedStream(encodeXmlPlist({ Status: "Success" })), "x").receive();
+    check("裸帧：小包照常收", isPlistDict(smallReply) && smallReply.Status === "Success");
+
+    const bigBlob = new Uint8Array(12_880_000).map((_, index) => index % 251);
+    const bigXml = encodeXmlPlist({ Status: 0, Payload: [bigBlob] });
+    const bigStarted = Date.now();
+    const bigReply = await new RawPlistClient(framedStream(bigXml), "com.apple.misagent.shim.remote").receive();
+    const bigElapsed = Date.now() - bigStarted;
+    const bigItems = isPlistDict(bigReply) && Array.isArray(bigReply.Payload) ? bigReply.Payload : [];
+    const bigBack = bigItems[0] instanceof Uint8Array ? bigItems[0] : null;
+    check(
+      `裸帧：收得下 ${bigXml.length} 字节（超过原生层 8 MiB）的回包，内容一字不差`,
+      bigBack !== null && bigBack.length === bigBlob.length && bigBack[0] === 0 && bigBack[1_000_003] === bigBlob[1_000_003] && bigBack[bigBlob.length - 1] === bigBlob[bigBlob.length - 1],
+      `${bigElapsed} ms`,
+    );
+    check("裸帧：大包不会越读越慢（17 MB 在 15 秒内读完并解析）", bigElapsed < 15_000, `${bigElapsed} ms`);
+
+    const hugeHeader = new Uint8Array(4);
+    new DataView(hugeHeader.buffer).setUint32(0, 65 * 1024 * 1024, false);
+    let headerGiven = false;
+    const headerOnly: ByteStream = {
+      read: async () => (headerGiven ? null : ((headerGiven = true), hugeHeader)),
+      write: async () => {},
+      close: async () => {},
+    };
+    const hugeError = await rejects(new RawPlistClient(headerOnly, "x").receive());
+    check("裸帧：长度字段离谱（65 MiB）的帧拒收", hugeError instanceof Error && hugeError.message.includes("回包长度异常 68157440"), String((hugeError as Error | undefined)?.message));
 
     // 占用空间：按 bundle ID 分组 Lookup，假设备按请求里的 BundleIDs 回大小
     const ids = Array.from({ length: 25 }, (_, index) => `com.example.app${index}`);

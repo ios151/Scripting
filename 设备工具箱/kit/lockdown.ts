@@ -24,10 +24,26 @@ import { BufferedReader, StreamClosedError, withTimeout, writeAll, type ByteStre
 import { decodePlist, encodeXmlPlist, isPlistDict, type PlistDict } from "./plist";
 
 /**
- * 单条消息的上限。`maximumFrameBytes` 只认 1 KiB–8 MiB，取顶格：
+ * 原生层单条消息的上限。`maximumFrameBytes` 只认 1 KiB–8 MiB，取顶格：
  * 壁纸预览图和 misagent 的全量描述文件都是 MB 级的。
+ * 超过它的回包原生层会拒收（`ERR_DEVICE_PROTOCOL`），只能走裸帧后端。
  */
 const MAX_FRAME = 8 * 1024 * 1024;
+
+/**
+ * 裸帧后端的单条消息上限。这条路是自己攒包，不受原生那层 8 MiB 的限制。
+ * 2026-10-31 一位装了上千个 App 的用户：misagent 的 `CopyAll` 一次回了 17178553 字节
+ * （约 16 MiB，上千份描述文件），按 8 MiB 卡会直接报「回包长度异常」。
+ * 这里只防长度字段读歪了，给个宽裕的上限。
+ */
+const RAW_MAX_FRAME = 64 * 1024 * 1024;
+
+/**
+ * 裸帧后端读大包时一段读多少。`BufferedReader.readExact` 每收到一块（隧道每次最多 16 KB）
+ * 就把已经攒的整份重新拷一遍，16 MB 的帧要拷近 9 GB；一段一段读进预先分配好的缓冲，
+ * 每段内部的重拷只有几块，总共几百 MB 以内。电脑上实测 17 MB 的帧：整帧 `readExact` 3 秒，分段读 51 毫秒。
+ */
+const RAW_READ_SLICE = 128 * 1024;
 
 /** 超过这个毫秒数的回包在日志里记一笔。收包和解析现在是一次原生调用，分不开计。 */
 const SLOW_REPLY = 200;
@@ -243,11 +259,21 @@ export class RawPlistClient extends BasePlistClient {
     const started = Date.now();
     const lengthBytes = await this.reader.readExact(4);
     const length = new DataView(lengthBytes.buffer as ArrayBuffer, lengthBytes.byteOffset, 4).getUint32(0, false);
-    if (length <= 0 || length > MAX_FRAME) throw new Error(`${this.serviceName} 回包长度异常 ${length}`);
-    const value = decodePlist(await this.reader.readExact(length));
+    if (length <= 0 || length > RAW_MAX_FRAME) throw new Error(`${this.serviceName} 回包长度异常 ${length}`);
+    const value = decodePlist(await this.readBody(length));
     const elapsed = Date.now() - started;
-    if (elapsed >= SLOW_REPLY) debugLog("shim", `${this.serviceName} 回包用了 ${elapsed} ms（裸帧）`);
+    if (elapsed >= SLOW_REPLY) debugLog("shim", `${this.serviceName} 回包 ${length} 字节，用了 ${elapsed} ms（裸帧）`);
     return value;
+  }
+
+  /** 读 `length` 字节的帧体。大包一段一段读进预先分配好的缓冲，别让 `readExact` 一次攒几十 MB（见 `RAW_READ_SLICE`）。 */
+  private async readBody(length: number): Promise<Uint8Array> {
+    if (length <= RAW_READ_SLICE) return this.reader.readExact(length);
+    const body = new Uint8Array(length);
+    for (let offset = 0; offset < length; offset += RAW_READ_SLICE) {
+      body.set(await this.reader.readExact(Math.min(RAW_READ_SLICE, length - offset)), offset);
+    }
+    return body;
   }
 
   async close(): Promise<void> {

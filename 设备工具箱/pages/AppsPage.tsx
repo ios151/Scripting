@@ -47,7 +47,7 @@ import {
   type AppSource,
 } from "../kit/apps";
 import { findStoreLinks, shareText, type StoreLink } from "../kit/appStore";
-import { loadCachedIcons, saveCachedIcons } from "../kit/cache";
+import { loadIconsWithCache } from "../kit/cache";
 import { deviceHub } from "../kit/hub";
 import {
   findRowAction,
@@ -328,21 +328,18 @@ export function AppsPage() {
     if (iconsBusy.current) return;
     iconsBusy.current = true;
     try {
-      const cached = refresh ? new Map<string, Uint8Array>() : await loadCachedIcons(bundleIds);
-      if (cached.size > 0) setIcons(toImages(cached));
-      const missing = bundleIds.filter((id) => !cached.has(id));
-      if (missing.length === 0) return;
-      setIconStatus(`载入图标 0/${missing.length}`);
-      // 几百个图标逐个取要十几秒，这期间切走不保活就断在半路
-      const fetched = await withKeepAlive("apps-icons", async () =>
-        readIcons(
-          await deviceHub.get(),
-          missing,
-          (done, total) => setIconStatus(`载入图标 ${done}/${total}`),
-          (batch) => setIcons((current) => new Map([...current, ...toImages(batch)])),
-        ),
+      await loadIconsWithCache(
+        bundleIds,
+        // 几百个图标逐个取要十几秒，这期间切走不保活就断在半路
+        (missing, onProgress, onBatch) =>
+          withKeepAlive("apps-icons", async () => readIcons(await deviceHub.get(), missing, onProgress, onBatch)),
+        {
+          onCached: (cached) => setIcons(toImages(cached)),
+          onProgress: (done, total) => setIconStatus(`载入图标 ${done}/${total}`),
+          onFetched: (batch) => setIcons((current) => new Map([...current, ...toImages(batch)])),
+        },
+        { refresh },
       );
-      await saveCachedIcons(fetched);
     } catch (error) {
       // 取不到就显示占位方块，不影响别的
       debugLog("apps", "图标没取到", describeError(error));

@@ -22,6 +22,8 @@ export type KeepAliveOwner =
   | "apps-icons"
   /** 应用管理：算占用空间，一百多个要半分钟。 */
   | "apps-sizes"
+  /** 主屏布局：逐个取图标，缓存是空的时候几百个要十几秒。 */
+  | "home-icons"
   /** 实时性能采样。 */
   | "sysmon"
   /** 系统事件监听，一挂就是十分钟。 */
