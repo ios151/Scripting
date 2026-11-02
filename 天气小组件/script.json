@@ -1,0 +1,31 @@
+{
+  "name": "天气小组件",
+  "localizedNames": {
+    "zh": "天气小组件",
+    "en": "Weather Widget"
+  },
+  "description": "主屏幕和锁屏的天气小组件：跟着当前定位或固定城市，大号气温、逐小时一排、体感湿度风空气质量、未来几天、天气预警徽章；默认用内置的彩云天气接口（001 提供），也可以换成自己的接口，或者备用的 Open-Meteo",
+  "localizedDescriptions": {
+    "zh": "主屏幕和锁屏的天气小组件：跟着当前定位或固定城市，大号气温、逐小时一排、体感湿度风空气质量、未来几天、天气预警徽章；默认用内置的彩云天气接口（001 提供），也可以换成自己的接口，或者备用的 Open-Meteo",
+    "en": "Home Screen and Lock Screen weather widgets that follow your location or a fixed city: big temperature, hourly strip, feels-like / humidity / wind / air quality, upcoming days and weather alert badges; uses a built-in Caiyun Weather service (provided by 001) by default, which you can swap for your own service or the backup Open-Meteo"
+  },
+  "version": "1.2.0",
+  "author": {
+    "name": "ios151",
+    "email": null,
+    "homepage": "https://github.com/ios151"
+  },
+  "contributors": [],
+  "remoteResource": {
+    "url": "https://raw.githubusercontent.com/ios151/Scripting/main/dist/WeatherWidget.zip"
+  },
+  "icon": "cloud.sun.fill",
+  "color": "rgba(10, 132, 255, 1)",
+  "iconImage": null,
+  "entry": "index.tsx",
+  "permissions": [
+    "location"
+  ],
+  "intentInputTypes": [],
+  "runInApp": true
+}

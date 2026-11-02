@@ -17,6 +17,7 @@
 | `设备工具箱/kit/airlift.ts`、`atc.ts`、`airbeep.ts` | 思路来自 @Waa404，实现为本项目重写（见下） |
 | `JavBus/` | 功能、接口与文案移植自 Nicked639 的 JSBox 脚本 JavBus 9.2，代码用 TypeScript 重写（见下） |
 | `快捷指令签名/` | 本项目独立实现，没有拷贝任何上游源码；签名流程参考了 0xilis 的格式研究（见下） |
+| `天气小组件/` | 本项目独立实现；版面和刷新规则移植自作者自己的虚拟定位 App（RoamControl）里的天气功能；数据来自彩云天气和 Open-Meteo（见下） |
 | `skills/shortcut-signer/` | 本项目原创；知识库里动作和参数的核对用到了公开资料，只引用事实、没有复制代码或数据（见下） |
 | `_selftest/` | 本项目原创 |
 | `dev-loopback/` | 本项目原创 |
@@ -167,6 +168,28 @@ Apple、iOS、Shortcuts（快捷指令）是 Apple Inc. 的商标，本脚本与
 
 结构检查器的规则和 `references/patterns.md` 里的写法模式，来自作者之前写的另一个快捷指令技能（作者自己的作品）。
 `references/scripting-intents.md` 是对 Scripting 自己那十个 App Intent 动作的观察记录，来自作者导出的快捷指令样本。
+
+---
+
+## 天气小组件的数据来源
+
+`天气小组件/` 的代码是自己用 TypeScript 写的，**没有拷贝任何上游源码**。它请求的天气数据来自下面两处：
+
+| 来源 | 用在哪 | 许可 / 条款 |
+|---|---|---|
+| [彩云天气](https://www.caiyunapp.com/)的综合天气接口 | 默认的数据源：实况、逐小时、未来几天、空气质量、生活指数、预警 | 内置接口由 001 提供；用自己的 token 时，使用条款以你在彩云平台上同意的为准 |
+| [Open-Meteo](https://open-meteo.com/) | 备用的数据源（脚本页「天气来源」里选），只有基础的天气 | 数据按 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) 提供；免费接口仅限非商业使用 |
+
+- 彩云相关文档来自小麦（Telegram @GetSomeTriticum）。
+- 署名：天气和预警数据来自彩云天气，由 001 提供 API 接口；备用来源的数据署名 *Weather data by Open-Meteo.com*。
+  署名写在脚本页「数据来源」里（带链接和许可），卡片上不画。
+- Open-Meteo 免费接口的限制（2026-11-02 查的官网[条款页](https://open-meteo.com/en/terms)和[价格页](https://open-meteo.com/en/pricing)，以官网当前的为准）：
+  只能非商用，放了订阅或广告就算商用；每分钟 600 次、每小时 5000 次、每天 10000 次、每月 30 万次；按 IP 地址和应用算，
+  滥用会被封，不另行通知；不保证可用性和准确性。
+- 本项目不含这两家的代码，只在运行时请求它们的公开接口。
+
+版面、刷新规则（15 分钟 / 5 公里）、逐小时数据的拼装和天气代码的对应表，移植自作者自己的虚拟定位 App RoamControl
+（基于上面列的 Roam Control 修改）里的天气功能——那部分是作者在自己的修改版里写的，不是上游的代码。源码注释里说的「RoamControl」就是它。
 
 ---
 

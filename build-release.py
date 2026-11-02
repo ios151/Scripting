@@ -26,6 +26,7 @@ ALIASES = {
     "WLOC 虚拟定位": "WLOC",
     "设备工具箱": "DeviceToolbox",
     "快捷指令签名": "ShortcutSigner",
+    "天气小组件": "WeatherWidget",
 }
 
 # 技能目录名 → zip 文件名（不含扩展名）
