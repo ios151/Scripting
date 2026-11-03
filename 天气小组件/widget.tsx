@@ -14,7 +14,7 @@ import type { Loaded } from "./core/load";
 import { present } from "./core/present";
 import { nextReloadAt } from "./core/schedule";
 import { parseParameter } from "./core/settings";
-import { loadSettings } from "./core/store";
+import { loadDisplay, loadSettings } from "./core/store";
 import { systemDeps } from "./core/system";
 import { WidgetView } from "./widget/view";
 
@@ -66,7 +66,7 @@ async function run(): Promise<void> {
       family={family}
       width={width}
       height={height}
-      content={present(loaded, now, size, alerts)}
+      content={present(loaded, now, size, alerts, loadDisplay())}
       tapURL={tapURL()}
     />,
     { policy: "after", date: new Date(nextReloadAt(loaded, now)) },

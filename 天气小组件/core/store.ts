@@ -3,6 +3,7 @@
 
 import { parseCache, parseStoredLocation, type Cache, type StoredLocation } from "./cache";
 import { defaultSource, parseSource, type DataSource } from "./dataSource";
+import { defaultDisplay, parseDisplay, type Display } from "./display";
 import { defaultSettings, parseSettings, type Settings } from "./settings";
 
 const CACHE_KEY = "weather.cache.v1";
@@ -10,6 +11,7 @@ const LOCATION_KEY = "weather.location.v1";
 const SETTINGS_KEY = "weather.settings.v1";
 const SOURCE_KEY = "weather.source.v1";
 const DEMO_KEY = "weather.alert-demo.v1";
+const DISPLAY_KEY = "weather.display.v1";
 /** 只做过预警、还没有「数据来源」之前的版本留下的键，不再用了，清缓存时顺手删掉 */
 const LEGACY_KEYS = ["weather.alerts.v1", "weather.alert-source.v1"];
 
@@ -65,6 +67,22 @@ export function readDataSource(): DataSource {
 export function writeDataSource(source: DataSource): void {
   Storage.set(SOURCE_KEY, source);
   Storage.remove(CACHE_KEY);
+}
+
+/**
+ * 显示样式（中号、大号上画哪些数据）。和位置设置、数据来源一样是用户的选择：清空缓存时不动。
+ * 读出来每一项再验一遍；没存过、读不出来都是默认的样子。
+ */
+export function loadDisplay(): Display {
+  try {
+    return parseDisplay(Storage.get<unknown>(DISPLAY_KEY));
+  } catch {
+    return defaultDisplay();
+  }
+}
+
+export function saveDisplay(display: Display): void {
+  Storage.set(DISPLAY_KEY, display);
 }
 
 /** 「预览预警样式」开到什么时候；没开、读不出来都是 0 */

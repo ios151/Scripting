@@ -1,14 +1,14 @@
-// 卡片里共用的小零件：多色图标、地名一行、预警徽章、分隔线、逐小时那一排、一行详细数据、未来几天。
+// 卡片里共用的小零件：多色图标、地名一行、预警徽章、分隔线、逐小时那一排、未来几天（一排 / 几行）、一行详细数据、右上那一行、底部的一句话。
 // 小组件和 App 里的预览用的是同一批，所以在 App 里看到的样子就是主屏幕上的样子。
 //
 // 一律只管画，不碰数据：要说什么话都在 core/present.ts 里算好了。
 // 卡片底部不再写「更新时间」和数据署名（嫌不好看）：只有出了状况才有一行提醒（见 bodies.tsx 的 BottomLine）；
 // 数据来源的署名都在脚本页的「数据来源」里。
 
-import { Capsule, Circle, HStack, Image, Rectangle, Text, VStack, ZStack } from "scripting";
+import { Capsule, Circle, HStack, Image, Rectangle, Spacer, Text, VStack, ZStack } from "scripting";
 import { ALERT_BADGE_RATIO, ALERT_GAP_RATIO, type Metrics } from "../core/layout";
 import { AQI_COLOR, BAR_FILL, BAR_TRACK, RAIN_TEXT } from "../core/palette";
-import type { AlertView, Card, DayView, SlotView, StatView } from "../core/present";
+import type { AlertView, Card, DayColumn, DayView, HeadlineView, SlotView, StatView } from "../core/present";
 import { AlertBadge } from "./badge";
 import { AQI_RING, HAIRLINE, TEXT, TEXT_2 } from "./theme";
 
@@ -105,28 +105,139 @@ export function Strip({ slots, columns, m }: { slots: readonly SlotView[]; colum
 }
 
 /**
- * 一行详细数据：几项平分整行的宽度，每项是「标签 值」（「体感 14°」「风 南风 1级」），
- * 空气质量前面带个按分级上色的小圆点（绿 / 黄 / 橙 / 红 / 紫）。
+ * 一项数据：「体感 14°」（标签淡一点，值粗一点）。空气质量在标签和值之间有个按分级上色的小圆点（绿 / 黄 / 橙 / 红 / 紫），带一圈白边。
+ * `stretch` 为真时撑开平分一行里的位置（StatsRow 用）；否则只占自己的宽度。`priority` 高的在地方不够时后缩小。
  */
+function StatItem({ item, size, stretch, priority }: { item: StatView; size: number; stretch: boolean; priority?: number }) {
+  return (
+    <HStack spacing={size * 0.3} frame={stretch ? { maxWidth: "infinity", alignment: "leading" } : undefined} layoutPriority={priority}>
+      <Text font={size} foregroundStyle={TEXT_2} lineLimit={1}>
+        {item.label}
+      </Text>
+      {item.band !== null ? (
+        <ZStack frame={{ width: size * 0.7, height: size * 0.7 }}>
+          <Circle fill={AQI_COLOR[item.band]} />
+          <Circle stroke={{ shapeStyle: AQI_RING, strokeStyle: { lineWidth: 0.75 } }} />
+        </ZStack>
+      ) : null}
+      <Text font={size} fontWeight="semibold" foregroundStyle={TEXT} lineLimit={1} minScaleFactor={0.7}>
+        {item.value}
+      </Text>
+    </HStack>
+  );
+}
+
+/** 一行详细数据：几项平分整行的宽度，每项是「标签 值」（「体感 14°」「风 南风 1级」） */
 export function StatsRow({ stats, size }: { stats: readonly StatView[]; size: number }) {
   return (
     <HStack spacing={0}>
       {stats.map((item) => (
-        <HStack key={item.key} spacing={size * 0.3} frame={{ maxWidth: "infinity", alignment: "leading" }}>
-          {item.band !== null ? (
-            <ZStack frame={{ width: size * 0.7, height: size * 0.7 }}>
-              <Circle fill={AQI_COLOR[item.band]} />
-              <Circle stroke={{ shapeStyle: AQI_RING, strokeStyle: { lineWidth: 0.75 } }} />
-            </ZStack>
-          ) : null}
-          <Text font={size} foregroundStyle={TEXT_2} lineLimit={1}>
-            {item.label}
-          </Text>
-          <Text font={size} fontWeight="semibold" foregroundStyle={TEXT} lineLimit={1} minScaleFactor={0.7}>
-            {item.value}
-          </Text>
-        </HStack>
+        <StatItem key={item.key} item={item} size={size} stretch />
       ))}
+    </HStack>
+  );
+}
+
+/**
+ * 中号右栏最上面那一行。默认是「天气图标 天气 降水概率」，靠左；选了「风和湿度」时是「北风 4级  湿度 94%」，整行在右栏里居中（天气图标那时在气温旁边）。
+ * 有预警时两种都换成预警徽章，靠左。
+ */
+export function TopLine({ card, m }: { card: Card; m: Metrics }) {
+  if (card.display.top === "windHumidity") {
+    // 有预警时这一行让给徽章：徽章靠左，和默认样式里它的位置一致
+    if (card.alert !== null) {
+      return (
+        <HStack spacing={m.top * 1.2}>
+          <AlertChip alertInfo={card.alert} size={m.rain} />
+          <Spacer />
+        </HStack>
+      );
+    }
+    // 风和湿度：前后各一个 Spacer，整行在右栏里居中（和下面那一排的宽度对称）
+    return (
+      <HStack spacing={m.top * 1.2}>
+        <Spacer />
+        {card.topItems.map((item) =>
+          item.key === "wind" ? (
+            <Text key={item.key} font={m.top} fontWeight="semibold" foregroundStyle={TEXT} lineLimit={1} minScaleFactor={0.7}>
+              {item.value}
+            </Text>
+          ) : (
+            <StatItem key={item.key} item={item} size={m.top} stretch={false} />
+          ),
+        )}
+        <Spacer />
+      </HStack>
+    );
+  }
+  return (
+    <HStack spacing={m.gap * 2}>
+      <WeatherIcon name={card.condition.symbol} size={m.icon} />
+      <Text font={m.cond} fontWeight="medium" foregroundStyle={TEXT} lineLimit={1} minScaleFactor={0.7}>
+        {card.condition.text}
+      </Text>
+      {card.alert !== null ? (
+        <AlertChip alertInfo={card.alert} size={m.rain} />
+      ) : card.rainShort !== null ? (
+        <Text font={m.rain} foregroundStyle={TEXT_2} lineLimit={1} minScaleFactor={0.7}>
+          {card.rainShort}
+        </Text>
+      ) : null}
+      <Spacer />
+    </HStack>
+  );
+}
+
+/**
+ * 中号中间那一排选了「未来几天」时：每列四行（星期、图标、最高、最低），平分整行的宽度。
+ * 和逐小时那一排一样，`columns` 比天数多时右边留空。
+ */
+export function DayStrip({ days, columns, m }: { days: readonly DayColumn[]; columns: number; m: Metrics }) {
+  const cells: Array<DayColumn | null> = [];
+  for (let index = 0; index < columns; index++) cells.push(index < days.length ? days[index] : null);
+  return (
+    <HStack alignment="top" spacing={0}>
+      {cells.map((day, index) =>
+        day === null ? (
+          <VStack key={"blank-" + index} frame={{ maxWidth: "infinity" }} />
+        ) : (
+          <VStack key={day.key} spacing={m.slotGap} frame={{ maxWidth: "infinity" }}>
+            <Text font={m.slotLabel} foregroundStyle={TEXT_2} lineLimit={1} minScaleFactor={0.7}>
+              {day.label}
+            </Text>
+            <ZStack frame={{ height: m.slotIconBox }}>
+              <WeatherIcon name={day.symbol} size={m.slotIcon} />
+            </ZStack>
+            <Text font={m.dayHigh} fontWeight="semibold" monospacedDigit foregroundStyle={TEXT} lineLimit={1} minScaleFactor={0.7}>
+              {day.high}
+            </Text>
+            <Text font={m.dayLow} monospacedDigit foregroundStyle={TEXT_2} lineLimit={1} minScaleFactor={0.7}>
+              {day.low}
+            </Text>
+          </VStack>
+        ),
+      )}
+    </HStack>
+  );
+}
+
+/**
+ * 底部「一句话 + 日落 + 空气」那一行：一句话靠左、字大、地方不够时先缩小；日落和空气靠右，不让它们缩。
+ * 三部分读不到的就不画；一句话没有时，日落和空气靠右排。
+ */
+export function HeadlineRow({ headline, m }: { headline: HeadlineView; m: Metrics }) {
+  return (
+    <HStack spacing={m.item * 0.8}>
+      {headline.text !== null ? (
+        <Text font={m.headline} fontWeight="semibold" foregroundStyle={TEXT} lineLimit={1} minScaleFactor={0.6} layoutPriority={0}>
+          {headline.text}
+        </Text>
+      ) : null}
+      <Spacer />
+      {headline.sun !== null ? (
+        <StatItem item={{ key: "sun", label: headline.sun.label, value: headline.sun.time, band: null }} size={m.item} stretch={false} priority={1} />
+      ) : null}
+      {headline.air !== null ? <StatItem item={headline.air} size={m.item} stretch={false} priority={1} /> : null}
     </HStack>
   );
 }

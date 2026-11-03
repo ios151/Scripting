@@ -22,7 +22,8 @@ import { FetchError } from "../天气小组件/core/failure";
 import { conditionFor, knownCodes } from "../天气小组件/core/condition";
 import { parseForecast, type Forecast } from "../天气小组件/core/forecast";
 import { distanceMeters, isValidCoord, type Coord } from "../天气小组件/core/geo";
-import { ALERT_BADGE_RATIO, CONTENT_MARGIN, familyOf, metricsFor } from "../天气小组件/core/layout";
+import { defaultDisplay, type Display } from "../天气小组件/core/display";
+import { ALERT_BADGE_RATIO, CONTENT_MARGIN, familyOf, layoutVariant, metricsFor } from "../天气小组件/core/layout";
 import { loadWeather, type Deps, type Input, type Loaded } from "../天气小组件/core/load";
 import { ENDPOINT, ForecastError, buildURL, fetchForecast, roundedForRequest } from "../天气小组件/core/openmeteo";
 import { AQI_COLOR, RAIN_TEXT, SKY, TEXT_SECONDARY_ALPHA } from "../天气小组件/core/palette";
@@ -797,7 +798,7 @@ async function main(): Promise<void> {
     for (const [family, width, height] of [["small", 158, 158], ["medium", 338, 158], ["large", 338, 354]] as const) {
       const m = metricsFor(family, width, height);
       check(`${family}：参考尺寸上缩放比是 1`, m.scale === 1);
-      check(`${family}：所有数都是有限的正数（左栏宽度除外）`, Object.entries(m).every(([key, value]) => Number.isFinite(value) && (["leftWidth", "stat", "day", "dayIcon", "dayRow", "dayGap", "bar"].includes(key) ? value >= 0 : value > 0)));
+      check(`${family}：所有数都是有限的正数（左栏宽度除外）`, Object.entries(m).every(([key, value]) => Number.isFinite(value) && (["leftWidth", "stat", "day", "dayIcon", "dayRow", "dayGap", "bar", "top", "headline", "item", "dayHigh", "dayLow", "bigIcon"].includes(key) ? value >= 0 : value > 0)));
     }
     check("内缩 = 16pt 乘缩放比（缩放比最小 0.7，所以最小是 11）；取的是 iPhone 上系统默认的内容边距", CONTENT_MARGIN === 16 && metricsFor("small", 158, 158).inset === 16 && metricsFor("medium", 338, 158).inset === 16 && metricsFor("small", 79, 79).inset === 11 && metricsFor("large", 676, 708).inset === 32);
     check("中号才有左栏", metricsFor("medium", 338, 158).leftWidth > 0 && metricsFor("small", 158, 158).leftWidth === 0 && metricsFor("large", 338, 354).leftWidth === 0);
@@ -811,10 +812,10 @@ async function main(): Promise<void> {
     check("字号不会缩到 8 以下", Object.entries(metricsFor("large", 50, 50)).every(([key, value]) => !["stat", "day", "slotLabel", "range"].includes(key) || value >= 8));
     check("内容区宽度 = 宽 − 两边内缩；只有大号的未来几天用它算温度条", metricsFor("large", 338, 354).contentWidth === 338 - 2 * 16 && metricsFor("medium", 338, 158).contentWidth === 306);
     // 中号：左栏之外的宽度平分给逐小时的 5 格，每格至少要放得下「-12°」（13pt 半粗等宽数字约 30pt）
-    check("中号右栏每格宽度 ≥ 32pt：各种常见宽度（小屏 321 到大屏 364）都放得下", [300, 321, 338, 364].every((width) => {
-      const medium = metricsFor("medium", width, 158);
+    check("中号右栏每格宽度 ≥ 32pt：各种常见宽度（小屏 321 到大屏 364）、两套字号都放得下", (["standard", "compact"] as const).every((variant) => [300, 321, 338, 364].every((width) => {
+      const medium = metricsFor("medium", width, 158, variant);
       return (medium.contentWidth - medium.leftWidth - medium.gap * 4) / 5 >= 32;
-    }));
+    })));
 
     // 竖向预算：按参考尺寸把每个版面从上到下的行高加一遍，要放得进「高 − 系统边距 32」里，还要留 8pt 余量。
     // 行高按字号的倍数估：带汉字的行 1.4（苹方的行高比拉丁文高得多），纯数字 / 图标 1.2。估大一点比估小一点安全。
@@ -864,6 +865,51 @@ async function main(): Promise<void> {
     const largePlain = largeHead + 0.5 + largeStrip * 2 + large.stat * CJK + large.rowGap * 5;
     check(`大号（备用来源）竖向预算：${largePlain.toFixed(0)} + ${SLACK} ≤ ${contentHeight(354)}`, largePlain + SLACK <= contentHeight(354));
     console.log(`    · 竖向预算（行高估法见上）：小号 ${smallNeed.toFixed(1)}（带徽章 ${smallChipNeed.toFixed(1)}） / ${contentHeight(158)}，中号 ${mediumNeed.toFixed(1)}（带徽章 ${mediumChipNeed.toFixed(1)}） / ${contentHeight(158)}，大号 ${largeDetailed.toFixed(1)}（备用来源 ${largePlain.toFixed(1)}） / ${contentHeight(354)}`);
+
+    // 显示样式：中号 12 种组合（中间一排 × 右上那一行 × 底部那一行，有没有预警各算一遍），竖向都要放得下，还要留 8pt 余量。
+    // 用的是 layoutVariant 选出的那套字号（选了「未来几天」或「一句话」的用紧凑的）；有预警时右上那一行换成徽章（比字略高）
+    const mediumNeedFor = (display: Display, withChip: boolean): number => {
+      const m = metricsFor("medium", 338, 158, layoutVariant("medium", display));
+      const windy = display.top === "windHumidity";
+      const left = m.place * CJK + Math.max(m.temp * LATIN, windy ? m.bigIcon * LATIN : 0) + m.range * CJK + m.gap * 2;
+      const chip = withChip ? chipHeight(m.rain) : 0;
+      const topRow = windy ? Math.max(m.top * CJK, chip) : Math.max(m.cond * CJK, m.icon * LATIN, chip);
+      const strip =
+        display.strip === "daily"
+          ? m.slotLabel * CJK + m.slotGap + m.slotIconBox + m.slotGap + m.dayHigh * LATIN + m.slotGap + m.dayLow * LATIN
+          : m.slotLabel * CJK + m.slotGap + m.slotIconBox + m.slotGap + m.slotText * CJK;
+      const right = topRow + 0.5 + strip + m.gap * 2 * 2;
+      const bottom = display.bottom === "stats" ? m.stat * CJK : display.bottom === "headline" ? Math.max(m.headline * CJK, m.item * CJK) : 0;
+      return Math.max(left, right) + (bottom > 0 ? m.gap * 2 + bottom : 0);
+    };
+    let worstMedium = 0;
+    const tooTall: string[] = [];
+    for (const strip of ["hourly", "daily"] as const) {
+      for (const top of ["condition", "windHumidity"] as const) {
+        for (const bottom of ["stats", "headline", "none"] as const) {
+          for (const chip of [false, true]) {
+            const need = mediumNeedFor({ strip, top, bottom, headline: "auto" }, chip);
+            worstMedium = Math.max(worstMedium, need);
+            if (need + SLACK > contentHeight(158)) tooTall.push(`${strip}/${top}/${bottom}${chip ? "/预警" : ""}：${need.toFixed(1)}`);
+          }
+        }
+      }
+    }
+    check(`中号 12 种显示样式组合（含有预警的）竖向都放得下：最高的一种 ${worstMedium.toFixed(1)} + ${SLACK} ≤ ${contentHeight(158)}${tooTall.length === 0 ? "" : "；放不下的：" + tooTall.join("、")}`, tooTall.length === 0);
+    check("默认样式（逐小时、天气和降水概率、体感湿度风空气）还是原来的字号和高度", mediumNeedFor(defaultDisplay(), false) === mediumNeed);
+    const largeHeadline = largeDetailed - large.stat * CJK + Math.max(large.headline * CJK, large.item * CJK);
+    check(`大号底部选「一句话」竖向预算：${largeHeadline.toFixed(1)} + ${SLACK} ≤ ${contentHeight(354)}`, largeHeadline + SLACK <= contentHeight(354));
+    console.log(`    · 显示样式的竖向预算：中号 12 种组合里最高的 ${worstMedium.toFixed(1)} / ${contentHeight(158)}，大号底部选「一句话」${largeHeadline.toFixed(1)} / ${contentHeight(354)}`);
+    check("紧凑版只有中号有：小号、大号要紧凑版也还是原来的字号；中号的紧凑版字号都不比原来的大", JSON.stringify(metricsFor("large", 338, 354, "compact")) === JSON.stringify(metricsFor("large", 338, 354)) && JSON.stringify(metricsFor("small", 158, 158, "compact")) === JSON.stringify(metricsFor("small", 158, 158)) && (() => {
+      const standard = metricsFor("medium", 338, 158);
+      const compact = metricsFor("medium", 338, 158, "compact");
+      return compact.temp < standard.temp && compact.place <= standard.place && compact.slotLabel <= standard.slotLabel && compact.slotText <= standard.slotText && compact.gap <= standard.gap && compact.leftWidth === standard.leftWidth;
+    })());
+    check("紧凑版里要用到的字号都有：一句话、日落和空气、未来几天的最高最低；原来的那套里没有（用不到）", (() => {
+      const compact = metricsFor("medium", 338, 158, "compact");
+      const standard = metricsFor("medium", 338, 158);
+      return compact.headline > 0 && compact.item > 0 && compact.dayHigh > 0 && compact.dayLow > 0 && compact.top > 0 && compact.bigIcon > 0 && standard.headline === 0 && standard.dayHigh === 0 && standard.top > 0 && standard.bigIcon > 0;
+    })());
   }
 
   // ---------------------------------------------------------------- 配色

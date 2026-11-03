@@ -28,14 +28,16 @@ import type { AlertState } from "./core/alertState";
 import { cleanHost, cleanToken } from "./core/caiyun";
 import { ALERT_DEMO_MS } from "./core/config";
 import { defaultSource, providerOf, type DataSource, type SourceMode } from "./core/dataSource";
+import type { Display } from "./core/display";
 import { loadEverything, type Everything } from "./core/everything";
 import type { Loaded, Source } from "./core/load";
 import { present, sourceTestMessage, updatedText, type Content } from "./core/present";
 import type { Settings } from "./core/settings";
-import { clearData, clearDemo, loadSettings, readDataSource, readDemoUntil, saveSettings, writeDataSource, writeDemoUntil } from "./core/store";
+import { clearData, clearDemo, loadDisplay, loadSettings, readDataSource, readDemoUntil, saveDisplay, saveSettings, writeDataSource, writeDemoUntil } from "./core/store";
 import { findPlace, systemDeps } from "./core/system";
 import { AlertsSection } from "./pages/AlertsSection";
 import { AirSection, DetailSection, LifeSection, SummarySection, WeekSection } from "./pages/DetailSections";
+import { DisplaySection } from "./pages/DisplaySection";
 import { LoadingCard, PreviewCard } from "./pages/Preview";
 import { SourceSection } from "./pages/SourceSection";
 
@@ -85,6 +87,7 @@ function App() {
   const [sourceChoice, setSourceChoice] = useState<SourceMode>(() => readDataSource().mode);
   const [hostText, setHostText] = useState(() => readDataSource().host);
   const [tokenText, setTokenText] = useState("");
+  const [display, setDisplay] = useState<Display>(() => loadDisplay());
   const [demoUntil, setDemoUntil] = useState(() => readDemoUntil());
   const [now, setNow] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
@@ -216,6 +219,13 @@ function App() {
     await refresh(true, settings);
   }
 
+  /** 换显示样式：存下来、让主屏幕的小组件重画，上面的卡片预览跟着变（预览用的是同一份样式） */
+  function changeDisplay(next: Display): void {
+    setDisplay(next);
+    saveDisplay(next);
+    Widget.reloadAll();
+  }
+
   /** 「预览预警样式」：10 分钟里给主屏幕和锁屏的小组件两条写着「示例」的假预警，好看看徽章长什么样 */
   async function startDemo(): Promise<void> {
     const until = Date.now() + ALERT_DEMO_MS;
@@ -249,7 +259,7 @@ function App() {
     await refresh(true, settings);
   }
 
-  const content: Content | null = loaded === null ? null : present(loaded, now, "compact", alerts ?? { kind: "off" });
+  const content: Content | null = loaded === null ? null : present(loaded, now, "compact", alerts ?? { kind: "off" }, display);
   const detail = content !== null && content.kind === "weather" ? content.detail : null;
   const cardWidth = Math.min(Math.max(Device.screen.width - 32, 280), 420);
 
@@ -282,6 +292,8 @@ function App() {
             </HStack>
           </Button>
         </Section>
+
+        <DisplaySection display={display} onChange={changeDisplay} />
 
         <SummarySection detail={detail} />
         <WeekSection detail={detail} />

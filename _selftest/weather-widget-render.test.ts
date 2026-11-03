@@ -17,16 +17,19 @@ import type { AlertState } from "../天气小组件/core/alertState";
 import { BUILTIN_HOST, OFFICIAL_HOST } from "../天气小组件/core/caiyun";
 import { adaptCaiyun } from "../天气小组件/core/caiyunWeather";
 import { defaultSource } from "../天气小组件/core/dataSource";
+import { defaultDisplay, sameDisplay, type Display } from "../天气小组件/core/display";
 import { FetchError, describeFailure } from "../天气小组件/core/failure";
 import type { Coord } from "../天气小组件/core/geo";
-import { ALERT_BADGE_RATIO, ALERT_GLYPH_RATIO, metricsFor } from "../天气小组件/core/layout";
+import { ALERT_BADGE_RATIO, ALERT_GLYPH_RATIO, layoutVariant, metricsFor } from "../天气小组件/core/layout";
 import type { Loaded } from "../天气小组件/core/load";
-import { ALERT_BADGE, AQI_COLOR, BAR_FILL, BAR_TRACK } from "../天气小组件/core/palette";
+import { ALERT_BADGE, AQI_COLOR, BAR_FILL, BAR_TRACK, TEXT_PRIMARY } from "../天气小组件/core/palette";
 import { LARGE_DAYS, NO_DATA, NO_LOCATION, present, type Card, type Content } from "../天气小组件/core/present";
 import { AlertsSection } from "../天气小组件/pages/AlertsSection";
 import { AirSection, DetailSection, LifeSection, SummarySection, WeekSection } from "../天气小组件/pages/DetailSections";
+import { DisplaySection } from "../天气小组件/pages/DisplaySection";
 import { LoadingCard, PreviewCard } from "../天气小组件/pages/Preview";
 import { SourceSection } from "../天气小组件/pages/SourceSection";
+import { bottomKind } from "../天气小组件/widget/bodies";
 import { WidgetView } from "../天气小组件/widget/view";
 
 let passed = 0;
@@ -400,6 +403,293 @@ function main(): void {
         check(`${name}（${size}）：标题和两句人话都在，有图标`, t.includes(content.title) && content.lines.every((line) => t.includes(line)) && symbols(view(size, content)).includes(content.symbol));
       }
     }
+  }
+
+  // ---------------------------------------------------------------- 显示样式
+  section("显示样式：中号的三处、大号的底部，选了什么就画什么");
+  {
+    const d = (display: Partial<Display>): Display => ({ ...defaultDisplay(), ...display });
+    const cardWith = (display: Partial<Display>, size: "compact" | "large" = "compact", from: Loaded = loaded, alerts?: AlertState): Card => card(present(from, NOW, size, alerts, d(display)));
+    const variantOf = (content: Card) => layoutVariant("medium", content.display);
+    const mediumM = (content: Card) => metricsFor("medium", 338, 158, variantOf(content));
+
+    // 每一种组合、每一种情况、每一个尺寸都画得出来
+    let drawn = 0;
+    let problems = "";
+    const situations: Array<[string, Loaded, AlertState | undefined]> = [
+      ["默认", loaded, undefined],
+      ["有预警", loaded, demo],
+      ["上次定位处", { ...loaded, source: "stored" }, undefined],
+      ["备用来源", plainLoaded, undefined],
+    ];
+    for (const strip of ["hourly", "daily"] as const) {
+      for (const top of ["condition", "windHumidity"] as const) {
+        for (const bottom of ["stats", "headline", "none"] as const) {
+          for (const [name, from, alerts] of situations) {
+            for (const size of ["compact", "large"] as const) {
+              const content = present(from, NOW, size, alerts, { strip, top, bottom, headline: "auto" });
+              for (const family of size === "compact" ? ["small", "medium", "circular", "rectangular", "inline"] : ["large"]) {
+                try {
+                  const root = view(family, content);
+                  drawn++;
+                  if (texts(root).length === 0 && symbols(root).length === 0) problems += `${strip}/${top}/${bottom}/${name}/${family}：画出来是空的；`;
+                } catch (error) {
+                  problems += `${strip}/${top}/${bottom}/${name}/${family}：${String(error).slice(0, 60)}；`;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    check(`12 种组合 × 4 种情况 × 6 个尺寸共 ${drawn} 张都画得出来、不是空的${problems === "" ? "" : "：" + problems}`, problems === "" && drawn === 12 * 4 * 6);
+
+    // 中间那一排选了「未来几天」
+    const dailyCard = cardWith({ strip: "daily" });
+    const daily = view("medium", dailyCard);
+    const dailyTexts = texts(daily);
+    const strips = (root: Node) => find(root, (node) => node.type === "HStack" && node.props.alignment === "top" && node.props.spacing === 0);
+    check("中间一排选「未来几天」：每列的星期、最高、最低依次写出来，明天、后天、周四、周五、周六", dailyCard.dayColumns.length === 5 && inOrder(dailyTexts, dailyCard.dayColumns.flatMap((column) => [column.label, column.high, column.low])) && dailyCard.dayColumns.map((column) => column.label).join() === "明天,后天,周四,周五,周六");
+    check("选了「未来几天」就没有逐小时那一排（没有「现在」）", !dailyTexts.includes("现在") && !dailyTexts.some((text) => /^\d+时$/.test(text)));
+    check("「未来几天」那一排：一排 5 列，每列四行（星期、图标、最高、最低）", (() => {
+      const found = strips(daily);
+      if (found.length !== 1 || found[0].children.length !== 5) return false;
+      return found[0].children.every((column) => typeof column !== "string" && column.type === "VStack" && column.children.length === 4);
+    })());
+    check("「未来几天」里最高的字比最低的粗、亮（最低是淡的次要文字）", (() => {
+      const stripNode = strips(daily)[0];
+      const highs = find(stripNode, (node) => node.type === "Text" && node.props.fontWeight === "semibold" && dailyCard.dayColumns.some((column) => column.high === textOf(node)));
+      const lows = find(stripNode, (node) => node.type === "Text" && node.props.fontWeight === undefined && dailyCard.dayColumns.some((column) => column.low === textOf(node)));
+      return highs.length === 5 && lows.length === 5 && highs.every((node) => node.props.foregroundStyle === TEXT_PRIMARY) && lows.every((node) => node.props.foregroundStyle !== TEXT_PRIMARY);
+    })());
+
+    // 右上那一行选了「风和湿度」
+    const windyCard = cardWith({ top: "windHumidity" });
+    const windy = view("medium", windyCard);
+    const windyTexts = texts(windy);
+    const windyM = mediumM(windyCard);
+    check("右上选「风和湿度」：写「西南风 1级」「湿度」「25%」，不写天气文字和降水概率", windyTexts.includes("西南风 1级") && windyTexts.includes("湿度") && windyTexts.includes("25%") && !windyTexts.includes(windyCard.condition.text) && (windyCard.rainShort === null || !windyTexts.includes(windyCard.rainShort)));
+    check("右上选「风和湿度」：天气图标挪到气温旁边（左栏里，字号是 bigIcon）；右上那一行没有图标", (() => {
+      const bigIcons = find(windy, (node) => node.type === "Image" && node.props.font === windyM.bigIcon && node.props.systemName === windyCard.condition.symbol);
+      const iconsInTopLine = find(windy, (node) => node.type === "Image" && node.props.font === windyM.icon && node.props.systemName === windyCard.condition.symbol);
+      return bigIcons.length === 1 && iconsInTopLine.length === 0;
+    })());
+    check("默认的右上那一行：天气图标、天气、降水概率；气温旁边没有大图标", (() => {
+      const standard = view("medium", c.compact);
+      const m = metricsFor("medium", 338, 158);
+      return find(standard, (node) => node.type === "Image" && node.props.font === m.bigIcon).length === 0 && texts(standard).includes(c.compact.condition.text);
+    })());
+    check("风是粗体白字、湿度是「淡标签 + 粗体值」", (() => {
+      const wind = find(windy, (node) => node.type === "Text" && textOf(node) === "西南风 1级")[0];
+      const humidity = find(windy, (node) => node.type === "Text" && textOf(node) === "25%")[0];
+      const label = find(windy, (node) => node.type === "Text" && textOf(node) === "湿度")[0];
+      return wind.props.fontWeight === "semibold" && wind.props.foregroundStyle === TEXT_PRIMARY && humidity.props.fontWeight === "semibold" && label.props.foregroundStyle !== TEXT_PRIMARY;
+    })());
+    const windyAlert = texts(view("medium", cardWith({ top: "windHumidity" }, "compact", loaded, demo)));
+    const countOf = (list: string[], text: string) => list.filter((item) => item === text).length;
+    check("右上选「风和湿度」时有预警：右上那一行换成预警徽章，风和湿度改写在底部（各只写一次）", windyAlert.includes("示例·暴雨橙色预警") && windyAlert.includes("+1") && countOf(windyAlert, "西南风 1级") === 1 && countOf(windyAlert, "25%") === 1 && windyAlert.includes("体感"));
+    check("右上写了风和湿度、底部是几项数据：底部不再重复写风和湿度，只剩体感和空气", countOf(windyTexts, "西南风 1级") === 1 && countOf(windyTexts, "25%") === 1 && windyTexts.includes("体感") && windyTexts.includes("空气") && countOf(windyTexts, "湿度") === 1);
+    check("右上写了风和湿度、底部选了「一句话」：风和湿度只在右上写一次", (() => {
+      const t = texts(view("medium", cardWith({ top: "windHumidity", bottom: "headline" })));
+      return countOf(t, "西南风 1级") === 1 && countOf(t, "25%") === 1 && !t.includes("体感");
+    })());
+    check("风和湿度只读到一项：只写那一项", (() => {
+      const onlyHumidity = cardWith({ top: "windHumidity" }, "compact", { ...loaded, extras: { ...sampleExtras, wind: null } });
+      const t = texts(view("medium", onlyHumidity));
+      return onlyHumidity.display.top === "windHumidity" && t.includes("25%") && !t.includes("西南风 1级");
+    })());
+
+    // 底部选了「一句话」
+    const headlineCard = cardWith({ bottom: "headline" });
+    const headlineView = view("medium", headlineCard);
+    const headlineTexts = texts(headlineView);
+    check("底部选「一句话」：一句话、日出（晚上写明早的）、空气，依次写出来；没有体感、湿度那几项", inOrder(headlineTexts, ["今日多云，气温适宜", "日出", "06:45", "空气", "优 50"]) && !headlineTexts.includes("体感") && !headlineTexts.includes("湿度"));
+    check("一句话是大字粗体白字，日落是小字；空气写成「标签、圆点、值」的顺序", (() => {
+      const m = mediumM(headlineCard);
+      const sentence = find(headlineView, (node) => node.type === "Text" && textOf(node) === "今日多云，气温适宜")[0];
+      const sunTime = find(headlineView, (node) => node.type === "Text" && textOf(node) === "06:45")[0];
+      const airItem = find(headlineView, (node) => node.type === "HStack" && node.children.some((child) => typeof child !== "string" && child.type === "Text" && textOf(child) === "空气"))[0];
+      const kinds = airItem.children.map((child) => (typeof child === "string" ? "字符串" : child.type === "ZStack" ? "圆点" : textOf(child)));
+      return sentence.props.font === m.headline && sentence.props.fontWeight === "semibold" && sunTime.props.font === m.item && kinds.join() === "空气,圆点,优 50";
+    })());
+    check("一句话缩得比日落和空气早（日落和空气的优先级高）", (() => {
+      const sentence = find(headlineView, (node) => node.type === "Text" && textOf(node) === "今日多云，气温适宜")[0];
+      const items = find(headlineView, (node) => node.type === "HStack" && typeof node.props.layoutPriority === "number" && node.props.layoutPriority > 0);
+      return sentence.props.layoutPriority === 0 && sentence.props.minScaleFactor !== undefined && items.length === 2;
+    })());
+    check("一句话换成「明日气温变化」：写「明日气温和今天差不多」", texts(view("medium", cardWith({ bottom: "headline", headline: "change" }))).includes("明日气温和今天差不多"));
+    check("自动 + 明天冷了 10.5°：写「明日平均降温 11°C」", texts(view("medium", cardWith({ bottom: "headline" }, "compact", { ...loaded, extras: { ...sampleExtras, days: sampleExtras.days.map((day, index) => (index === 1 ? { ...day, high: 5, low: 1 } : day)) } }))).includes("明日平均降温 11°C"));
+    check("出了状况（用的是上次的位置）：底部写那句提醒，一句话让位", (() => {
+      const stored = cardWith({ bottom: "headline" }, "compact", { ...loaded, source: "stored" });
+      const t = texts(view("medium", stored));
+      return t.includes("上次定位处的天气") && !t.includes("今日多云，气温适宜");
+    })());
+    check("一句话没有、日落和空气有：日落和空气靠右（一句话那一块不画）", (() => {
+      const noSentence = cardWith({ bottom: "headline", headline: "keypoint" }, "compact", { ...loaded, extras: { ...sampleExtras, keypoint: null } });
+      const t = texts(view("medium", noSentence));
+      return noSentence.headline !== null && noSentence.headline.text === null && t.includes("06:45") && t.includes("优 50") && !t.includes("今日多云，气温适宜");
+    })());
+
+    // 底部选了「不显示」
+    const noneCard = cardWith({ bottom: "none" });
+    const noneTexts = texts(view("medium", noneCard));
+    check("底部选「不显示」：没有体感、湿度、一句话，也没有日落和空气；两栏摆在正中间（顶上放个 Spacer）", !noneTexts.includes("体感") && !noneTexts.includes("空气") && !noneTexts.includes("今日多云，气温适宜") && (() => {
+      const outer = find(view("medium", noneCard), (node) => node.type === "VStack" && node.props.alignment === "leading" && node.children.some((child) => typeof child !== "string" && child.type === "HStack" && child.props.alignment === "top"))[0];
+      const first = outer.children[0];
+      return typeof first !== "string" && first.type === "Spacer";
+    })());
+    check("底部选「不显示」时，出了状况的提醒还是要写（用的是旧数据，得让人知道）", texts(view("medium", cardWith({ bottom: "none" }, "compact", { ...loaded, refreshFailed: true, failure: describeFailure(new FetchError("server")) }))).includes("没刷新成功，显示旧数据"));
+    check("底部选「不显示」时，未来两小时有雨的说明也不写", (() => {
+      const rainy = cardWith({ bottom: "none" }, "compact", { ...loaded, extras: { ...sampleExtras, rainNote: "25 分钟后开始下雨" } });
+      return !texts(view("medium", rainy)).includes("25 分钟后开始下雨");
+    })());
+    check("默认的底部：未来两小时有雨就写雨，没有雨写体感湿度风空气", texts(view("medium", cardWith({}, "compact", { ...loaded, extras: { ...sampleExtras, rainNote: "25 分钟后开始下雨" } }))).includes("25 分钟后开始下雨") && texts(view("medium", c.compact)).includes("体感"));
+
+    // 选了哪套字号，就真的用哪套
+    check("字号：默认、右上选「风和湿度」、底部选「不显示」用原来那套（气温 44）；选「未来几天」或「一句话」用紧凑那套（气温 40）", (() => {
+      const temperatureFont = (content: Card) => find(view("medium", content), (node) => node.type === "Text" && textOf(node) === content.temperature)[0].props.font;
+      const standard = metricsFor("medium", 338, 158).temp;
+      const compact = metricsFor("medium", 338, 158, "compact").temp;
+      return standard === 44 && compact === 40 && temperatureFont(cardWith({})) === standard && temperatureFont(cardWith({ top: "windHumidity" })) === standard && temperatureFont(cardWith({ bottom: "none" })) === standard && temperatureFont(cardWith({ strip: "daily" })) === compact && temperatureFont(cardWith({ bottom: "headline" })) === compact && temperatureFont(cardWith({ strip: "daily", bottom: "headline", top: "windHumidity" })) === compact;
+    })());
+    check("备用来源选了「未来几天」「一句话」：按默认的样子、用原来那套字号画", (() => {
+      const backup = cardWith({ strip: "daily", bottom: "headline", top: "windHumidity" }, "compact", plainLoaded);
+      const font = find(view("medium", backup), (node) => node.type === "Text" && textOf(node) === backup.temperature)[0].props.font;
+      return font === metricsFor("medium", 338, 158).temp && layoutVariant("medium", backup.display) === "standard";
+    })());
+    check("App 里的卡片预览也用同一套：选了「未来几天」，预览里气温是紧凑那套的字号", (() => {
+      const width = 358;
+      const height = Math.round(width * (158 / 338));
+      const expected = metricsFor("medium", width, height, "compact").temp;
+      const preview = render(PreviewCard({ content: dailyCard, width }));
+      return find(preview, (node) => node.type === "Text" && textOf(node) === dailyCard.temperature)[0].props.font === expected && expected !== metricsFor("medium", width, height).temp;
+    })());
+
+    // 大号的底部
+    const largeHeadline = cardWith({ bottom: "headline" }, "large");
+    const largeTexts = texts(view("large", largeHeadline));
+    check("大号底部选「一句话」：一句话、日出、空气写在最下面一行，没有体感湿度那几项；字号是 15", inOrder(largeTexts, ["今日多云，气温适宜", "日出", "06:45", "空气", "优 50"]) && !largeTexts.includes("体感") && find(view("large", largeHeadline), (node) => node.type === "Text" && textOf(node) === "今日多云，气温适宜")[0].props.font === metricsFor("large", 338, 354).headline);
+    check("大号的未来几天、逐小时不受影响（选了「一句话」照样有 4 行、6 格）", (() => {
+      const root = view("large", largeHeadline);
+      const m = metricsFor("large", 338, 354);
+      return find(root, (node) => node.type === "HStack" && frameOf(node).height === m.dayRow).length === LARGE_DAYS && strips(root).length === 1 && strips(root)[0].children.length === 6;
+    })());
+    check("大号底部选「不显示」：最下面没有那一行；出了状况的提醒还在", (() => {
+      const none = texts(view("large", cardWith({ bottom: "none" }, "large")));
+      const failed = texts(view("large", cardWith({ bottom: "none" }, "large", { ...loaded, refreshFailed: true, failure: describeFailure(new FetchError("server")) })));
+      return !none.includes("体感") && !none.includes("空气") && failed.includes("刚才没刷新成功，显示的是之前的数据");
+    })());
+    check("大号没有中间一排和右上那一行可换：选了也不变", (() => {
+      const wide = view("large", cardWith({ strip: "daily", top: "windHumidity" }, "large"));
+      const t = texts(wide);
+      return t.includes("现在") && t.includes(c.large.condition.text);
+    })());
+
+    check("底部几项平分整行（每一项撑满平分）；一句话那一行里的日落和空气只占自己的宽度，不撑开", (() => {
+      const labels = ["体感", "湿度", "风", "空气"];
+      const hasLabel = (node: Node, wanted: string[]) => node.type === "HStack" && node.children.some((child) => typeof child !== "string" && child.type === "Text" && wanted.includes(textOf(child)));
+      const maxWidthOf = (node: Node) => (node.props.frame as { maxWidth?: string } | undefined)?.maxWidth;
+      const statItems = find(view("medium", cardWith({})), (node) => hasLabel(node, labels));
+      const headlineItems = find(view("medium", cardWith({ bottom: "headline" })), (node) => hasLabel(node, ["空气", "日出"]));
+      return statItems.length === 4 && statItems.every((node) => maxWidthOf(node) === "infinity") && headlineItems.length === 2 && headlineItems.every((node) => node.props.frame === undefined);
+    })());
+    check("右上写了风和湿度，而底部本来只有风和湿度可写（体感、空气读不到）：底部什么也不剩，那一行不画，两栏摆在正中间", (() => {
+      const only = cardWith({ top: "windHumidity" }, "compact", { ...loaded, extras: { ...sampleExtras, apparent: null, aqi: null } });
+      const outer = find(view("medium", only), (node) => node.type === "VStack" && node.props.alignment === "leading" && node.children.some((child) => typeof child !== "string" && child.type === "HStack" && child.props.alignment === "top"))[0];
+      const first = outer.children[0];
+      return only.bottomStats.length === 0 && bottomKind(only) === "none" && typeof first !== "string" && first.type === "Spacer";
+    })());
+
+    // 横向的几处写法（真机上才看得出效果，这里至少守住写法没被改掉）
+    const isSpacer = (node: Node | string) => typeof node !== "string" && node.type === "Spacer";
+    const rowWith = (root: Node, firstText: string) => find(root, (node) => node.type === "HStack" && node.children.some((child) => typeof child !== "string" && textOf(child) === firstText))[0];
+    check("右上默认那一行（图标、天气、降水概率）：末尾有 Spacer、开头没有，内容靠左，不被拉开", (() => {
+      const row = rowWith(view("medium", c.compact), c.compact.condition.text);
+      return isSpacer(row.children[row.children.length - 1]) && !isSpacer(row.children[0]);
+    })());
+    check("右上选「风和湿度」：前后各一个 Spacer、中间依次是风和湿度，整行在右栏里居中（真机上看着靠左不对称）", (() => {
+      const row = rowWith(windy, "西南风 1级");
+      const kinds = row.children.map((child) => (isSpacer(child) ? "空白" : textOf(child)));
+      return kinds.join() === "空白,西南风 1级,湿度25%,空白";
+    })());
+    check("右上选「风和湿度」时有预警：徽章还是靠左（开头不是 Spacer、末尾有 Spacer），不跟着居中", (() => {
+      const root = view("medium", cardWith({ top: "windHumidity" }, "compact", loaded, demo));
+      const rows = find(root, (node) => {
+        const [first, second] = node.children;
+        return node.type === "HStack" && node.children.length === 2 && typeof first !== "string" && texts(first).includes("示例·暴雨橙色预警") && isSpacer(second);
+      });
+      return rows.length === 1;
+    })());
+    check("「未来几天」里最高、最低的气温都是等宽数字（各列的数字才对得齐）", (() => {
+      const stripNode = strips(daily)[0];
+      const numbers = find(stripNode, (node) => node.type === "Text" && dailyCard.dayColumns.some((column) => column.high === textOf(node) || column.low === textOf(node)));
+      return numbers.length === 10 && numbers.every((node) => node.props.monospacedDigit === true);
+    })());
+    check("右上选「风和湿度」时气温旁边有图标：气温一行不折行、放不下就缩（lineLimit 1、minScaleFactor），图标不大于气温字号的 0.75 倍", (() => {
+      const temperature = find(windy, (node) => node.type === "Text" && textOf(node) === windyCard.temperature)[0];
+      return temperature.props.lineLimit === 1 && typeof temperature.props.minScaleFactor === "number" && windyM.bigIcon <= windyM.temp * 0.75 && windyM.bigIcon > 0;
+    })());
+    check("气温旁边的图标：两套字号里都不大于气温字号的 0.75 倍（不然把气温挤小）", (["standard", "compact"] as const).every((variant) => {
+      const m = metricsFor("medium", 338, 158, variant);
+      return m.bigIcon > 0 && m.bigIcon <= m.temp * 0.75;
+    }));
+    check("一句话、风、湿度、日落、空气都是一行（lineLimit 1），不会折成两行把竖向撑高", (() => {
+      const headlineRoot = view("medium", cardWith({ bottom: "headline" }));
+      const oneLine = (root: Node, wanted: string[]) => find(root, (node) => node.type === "Text" && wanted.includes(textOf(node))).every((node) => node.props.lineLimit === 1);
+      return oneLine(headlineRoot, ["今日多云，气温适宜", "日出", "06:45", "空气", "优 50"]) && oneLine(windy, ["西南风 1级", "湿度", "25%"]);
+    })());
+
+    // bottomKind：底部那一行画什么
+    check("bottomKind：提醒永远先；其次看选的样式（不显示 / 一句话），默认的是有雨说雨、否则几项数据；备用来源什么都没有", (() => {
+      const kind = (content: Card) => bottomKind(content);
+      const stored = cardWith({}, "compact", { ...loaded, source: "stored" });
+      const rainy = { ...loaded, extras: { ...sampleExtras, rainNote: "25 分钟后开始下雨" } };
+      return kind(cardWith({})) === "stats" && kind(cardWith({ bottom: "none" })) === "none" && kind(cardWith({ bottom: "headline" })) === "headline" && kind(cardWith({}, "compact", rainy)) === "rain" && kind(cardWith({ bottom: "headline" }, "compact", rainy)) === "headline" && kind(cardWith({ bottom: "none" }, "compact", rainy)) === "none" && kind(stored) === "note" && kind(cardWith({ bottom: "none" }, "compact", { ...loaded, source: "stored" })) === "note" && kind(cardWith({ bottom: "headline" }, "compact", { ...loaded, source: "stored" })) === "note" && kind(cardWith({}, "compact", plainLoaded)) === "none" && kind(cardWith({ bottom: "headline" }, "compact", plainLoaded)) === "none";
+    })());
+  }
+
+  // ---------------------------------------------------------------- 设置页里的「显示样式」
+  section("App 页：显示样式一节");
+  {
+    const make = (display: Display, onChange: (next: Display) => void = () => undefined) => render(DisplaySection({ display, onChange }));
+    const pickers = (root: Node) => find(root, (node) => node.type === "Picker");
+    const def = defaultDisplay();
+    check("默认样式：三个选择器（中间一排、右上一行、底部一行），没有「恢复默认样式」", pickers(make(def)).length === 3 && !texts(make(def)).includes("恢复默认样式"));
+    check("底部选了「一句话」才多出第四个选择器：一句话写什么", pickers(make({ ...def, bottom: "headline" })).length === 4 && pickers(make({ ...def, bottom: "none" })).length === 3);
+    check("选项都在：逐小时 / 未来几天；天气和降水概率 / 风和湿度；体感湿度风空气 / 一句话日落空气 / 不显示；自动 / 彩云的一句话 / 明天比今天冷还是暖", (() => {
+      const all = texts(make({ ...def, bottom: "headline" }));
+      return ["逐小时", "未来几天", "天气和降水概率", "风和湿度", "体感、湿度、风、空气", "一句话、日落、空气", "不显示", "自动", "彩云的一句话", "明天比今天冷还是暖"].every((text) => all.includes(text));
+    })());
+    check("选项的 tag 就是存下来的值", (() => {
+      const root = make({ ...def, bottom: "headline" });
+      const tags = find(root, (node) => node.type === "Text" && typeof node.props.tag === "string").map((node) => node.props.tag);
+      return ["hourly", "daily", "condition", "windHumidity", "stats", "headline", "none", "auto", "keypoint", "change"].every((tag) => tags.includes(tag));
+    })());
+    check("改一个选择器：只改它那一项，别的项不变", (() => {
+      const seen: Display[] = [];
+      const root = make({ ...def, top: "windHumidity" }, (next) => seen.push(next));
+      const [strip, top, bottom] = pickers(root);
+      (strip.props.onChanged as (value: string) => void)("daily");
+      (top.props.onChanged as (value: string) => void)("condition");
+      (bottom.props.onChanged as (value: string) => void)("none");
+      return seen.length === 3 && JSON.stringify(seen[0]) === JSON.stringify({ ...def, top: "windHumidity", strip: "daily" }) && seen[1].top === "condition" && seen[1].strip === "hourly" && seen[2].bottom === "none";
+    })());
+    check("选择器停在现在的值上", (() => {
+      const root = make({ strip: "daily", top: "windHumidity", bottom: "headline", headline: "keypoint" });
+      return pickers(root).map((node) => node.props.value).join() === "daily,windHumidity,headline,keypoint";
+    })());
+    check("不是默认的样式才有「恢复默认样式」，点了交出默认的样式", (() => {
+      const seen: Display[] = [];
+      const root = make({ ...def, strip: "daily" }, (next) => seen.push(next));
+      const reset = find(root, (node) => node.type === "Button")[0];
+      (reset.props.action as () => void)();
+      return texts(root).includes("恢复默认样式") && seen.length === 1 && sameDisplay(seen[0], def);
+    })());
+    check("说明文字：一句一行，写了默认的样子和备用来源的情况", (() => {
+      const footer = make(def).props.footer;
+      const text = isNode(footer) ? textOf(footer) : "";
+      return text.split("\n").length >= 4 && text.includes("默认：逐小时、天气和降水概率、体感湿度风空气") && text.includes("备用来源（Open-Meteo）没有这些数据，会按默认的样子画");
+    })());
   }
 
   // ---------------------------------------------------------------- 预览卡片

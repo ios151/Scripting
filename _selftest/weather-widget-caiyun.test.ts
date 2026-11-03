@@ -25,9 +25,13 @@ import { FAILURE_REASONS, FetchError, classifyFailure, describeFailure, failureM
 import type { Forecast } from "../天气小组件/core/forecast";
 import type { Coord } from "../天气小组件/core/geo";
 import type { Loaded } from "../天气小组件/core/load";
-import { LARGE_DAYS, detailOf, present, sourceStatusText, updatedText, visibilityText, weekdayOf, windText } from "../天气小组件/core/present";
+import { DEMO_ALERTS } from "../天气小组件/core/alerts";
+import { LARGE_DAYS, MEDIUM_DAYS, detailOf, effectiveDisplay, present, sourceStatusText, updatedText, visibilityText, weekdayOf, windText, type Content } from "../天气小组件/core/present";
+import { defaultDisplay, parseDisplay, sameDisplay, type Display } from "../天气小组件/core/display";
+import { NOTABLE_CHANGE, changeText, headlineText, nextSunEvent, temperatureChange } from "../天气小组件/core/headline";
+import { layoutVariant } from "../天气小组件/core/layout";
 import { buildSnapshot } from "../天气小组件/core/snapshot";
-import { clearData, clearDemo, readCache, readDataSource, readDemoUntil, readLocation, writeCache, writeDataSource, writeDemoUntil, writeLocation } from "../天气小组件/core/store";
+import { clearData, clearDemo, loadDisplay, readCache, readDataSource, readDemoUntil, readLocation, writeCache, writeDataSource, saveDisplay, writeDemoUntil, writeLocation } from "../天气小组件/core/store";
 import { isDaylight, localDate, sunTimes } from "../天气小组件/core/sun";
 
 let passed = 0;
@@ -567,6 +571,17 @@ async function main(): Promise<void> {
     memory.set("weather.settings.v1", { mode: "current", fixed: null });
     clearData();
     check("清空缓存：天气缓存、上次的定位、老版本留下的键都没了；数据来源和位置设置还在", readCache() === null && readLocation() === null && !memory.has("weather.alerts.v1") && !memory.has("weather.alert-source.v1") && readDataSource().mode === "openmeteo" && memory.has("weather.settings.v1"));
+    check("显示样式：没存过是默认的；存了再读一字不差；清空缓存不动它；读坏了回默认", (() => {
+      const mine: Display = { strip: "daily", top: "windHumidity", bottom: "headline", headline: "keypoint" };
+      const fresh = sameDisplay(loadDisplay(), defaultDisplay());
+      saveDisplay(mine);
+      const saved = JSON.stringify(loadDisplay()) === JSON.stringify(mine);
+      clearData();
+      const kept = JSON.stringify(loadDisplay()) === JSON.stringify(mine);
+      memory.set("weather.display.v1", "乱写的");
+      const broken = sameDisplay(loadDisplay(), defaultDisplay());
+      return fresh && saved && kept && broken;
+    })());
     check("预览预警样式的截止时间：存得进、读得回、清得掉；读坏了是 0", (() => {
       writeDemoUntil(NOW + 5);
       const stored = readDemoUntil();
@@ -583,7 +598,7 @@ async function main(): Promise<void> {
     memory.set("weather.cache.v1", "乱写的");
     check("缓存读坏了：当没有", readCache() === null);
     broken = true;
-    check("存储读不出来（抛错）：当默认（内置）、缓存当没有、位置当没有、预览当没开，不崩", readDataSource().mode === "builtin" && readCache() === null && readLocation() === null && readDemoUntil() === 0);
+    check("存储读不出来（抛错）：当默认（内置）、缓存当没有、位置当没有、预览当没开、显示样式回默认，不崩", readDataSource().mode === "builtin" && readCache() === null && readLocation() === null && readDemoUntil() === 0 && sameDisplay(loadDisplay(), defaultDisplay()));
     broken = false;
     if (previous !== undefined) Object.defineProperty(globalThis, "Storage", previous);
     else delete (globalThis as unknown as { Storage?: unknown }).Storage;
@@ -661,6 +676,132 @@ async function main(): Promise<void> {
     check("状态行：没取过 / 没位置 / 没数据（带原因）/ 刷新没成功（带原因）/ 正常（几点更新）", sourceStatusText(null, NOW) === "正在取…" && sourceStatusText({ kind: "noLocation" }, NOW) === "没拿到位置" && sourceStatusText({ kind: "noData", source: "live", place: null, failure }, NOW) === "token 无效，或者没开通" && sourceStatusText({ kind: "noData", source: "live", place: null, failure: null }, NOW) === "天气暂时取不到" && sourceStatusText({ ...loaded, refreshFailed: true, failure }, NOW) === "这次没刷新成功：token 无效，或者没开通" && sourceStatusText({ ...loaded, refreshFailed: true, failure: null }, NOW) === "这次没刷新成功：联网失败" && sourceStatusText(loaded, NOW) === updatedText(NOW, NOW));
   }
 
+  // ---------------------------------------------------------------- 显示样式
+  section("显示样式：设置怎么读、一句话和日落怎么挑、卡片上带哪些数据");
+  {
+    // 设置
+    const def = defaultDisplay();
+    const everything: Display = { strip: "daily", top: "windHumidity", bottom: "headline", headline: "change" };
+    check("默认：逐小时、天气和降水概率、体感湿度风空气、一句话自动（也就是原来的样子）", def.strip === "hourly" && def.top === "condition" && def.bottom === "stats" && def.headline === "auto");
+    check("存了再读：一字不差", JSON.stringify(parseDisplay(clone(everything))) === JSON.stringify(everything));
+    check("没存过、读不出来、乱写：都是默认的", [null, undefined, 3, "x", [], {}].every((value) => sameDisplay(parseDisplay(value), def)));
+    check("某一项读不懂只丢那一项，别的项照用", (() => {
+      const got = parseDisplay({ strip: "daily", top: "weird", bottom: 3, headline: "keypoint" });
+      return got.strip === "daily" && got.top === "condition" && got.bottom === "stats" && got.headline === "keypoint";
+    })());
+    check("原型链上的名字、大小写不对的、空串都不认", ["constructor", "__proto__", "Daily", "", "toString"].every((value) => sameDisplay(parseDisplay({ strip: value, top: value, bottom: value, headline: value }), def)));
+    check("sameDisplay：四项都一样才算一样", sameDisplay(def, defaultDisplay()) && !sameDisplay(def, { ...def, strip: "daily" }) && !sameDisplay(def, { ...def, top: "windHumidity" }) && !sameDisplay(def, { ...def, bottom: "none" }) && !sameDisplay(def, { ...def, headline: "change" }));
+    check("字号用哪套：只有中号选了「未来几天」或「一句话」才用紧凑的；小号、大号、锁屏、没有样式都用原来的", layoutVariant("medium", def) === "standard" && layoutVariant("medium", { ...def, strip: "daily" }) === "compact" && layoutVariant("medium", { ...def, bottom: "headline" }) === "compact" && layoutVariant("medium", { ...def, bottom: "none" }) === "standard" && layoutVariant("medium", { ...def, top: "windHumidity" }) === "standard" && layoutVariant("large", everything) === "standard" && layoutVariant("small", everything) === "standard" && layoutVariant("circular", everything) === "standard" && layoutVariant("medium", null) === "standard");
+
+    // 下一次日出 / 日落
+    const sunAt = (offsetHours: number, coord: Coord = BEIJING) => nextSunEvent(adaptOk(SAMPLE, { now: NOW + hours(offsetHours), coord }).forecast);
+    const said = (view: { label: string; time: string } | null) => (view === null ? "没有" : view.label + " " + view.time);
+    check("晚上 21:22：下一次是明早的日出 06:45", said(sunAt(0)) === "日出 06:45");
+    check("凌晨 04:22：下一次是今天的日出 06:44", said(sunAt(-17)) === "日出 06:44");
+    check("中午 12:22：下一次是今天的日落 17:11", said(sunAt(-9)) === "日落 17:11");
+    check("傍晚 17:22（日落之后）：下一次是明早的日出 06:45", said(sunAt(-4)) === "日出 06:45");
+    check("正好是日落那一分钟：已经不算「接下来」，下一次是明早的日出", (() => {
+      const forecast = adaptOk(SAMPLE, { now: Date.UTC(2026, 10, 2, 17, 11) - 8 * 3_600_000 }).forecast;
+      return said(nextSunEvent(forecast)) === "日出 06:45";
+    })());
+    check("极夜 / 极昼的地方没有日出日落：null", nextSunEvent(adaptOk(SAMPLE, { coord: { latitude: 78, longitude: 15 }, now: Date.UTC(2026, 11, 21, 12) }).forecast) === null);
+    check("日出日落读不出来（乱写的、空的）或当前时间读不出来：null", (() => {
+      const broken = clone(base.forecast);
+      broken.daily.sunrise = ["坏的", null];
+      broken.daily.sunset = [];
+      const noNow = clone(base.forecast);
+      noNow.current.time = "不是时间";
+      return nextSunEvent(broken) === null && nextSunEvent(noNow) === null;
+    })());
+
+    // 明天比今天冷还是暖
+    const day = (high: number, low: number, date: string) => dayOf(date, high, low, 0, 0);
+    check("明天比今天的平均气温：每天最高最低的中间值相减（10/0 → 5，2/-2 → 0，所以 −5）", temperatureChange([day(10, 0, "2026-11-02"), day(2, -2, "2026-11-03")]) === -5);
+    check("暖了是正的；差半度也算", temperatureChange([day(10, 0, "2026-11-02"), day(11, 1, "2026-11-03")]) === 1 && temperatureChange([day(10, 1, "2026-11-02"), day(10, 2, "2026-11-03")]) === 0.5);
+    check("没有天、只有一天、第二项不是明天（中间缺了一天）：null", temperatureChange([]) === null && temperatureChange([day(1, 0, "2026-11-02")]) === null && temperatureChange([day(1, 0, "2026-11-02"), day(1, 0, "2026-11-04")]) === null);
+    check("跨月、跨年也算相邻", temperatureChange([day(5, 1, "2026-10-31"), day(3, 1, "2026-11-01")]) === -1 && temperatureChange([day(5, 1, "2026-12-31"), day(3, 1, "2027-01-01")]) === -1);
+    check("样例里明天和今天的平均气温都是 13.5：没变化", base.extras.days.length >= 2 && temperatureChange(base.extras.days) === 0);
+    check("变冷：「明日平均降温 N°C」，N 取整（6.5 → 7，平局远离零）", changeText(-6.5, false) === "明日平均降温 7°C" && changeText(-9, true) === "明日平均降温 9°C");
+    check("变暖：「明日平均升温 N°C」", changeText(3, false) === "明日平均升温 3°C" && changeText(0.5, false) === "明日平均升温 1°C");
+    check("不到 1°：总要写一句时写「明日气温和今天差不多」，否则不写；没有数据都不写", changeText(0.4, true) === "明日气温和今天差不多" && changeText(-0.4, true) === "明日气温和今天差不多" && changeText(0, true) === "明日气温和今天差不多" && changeText(0.4, false) === null && changeText(0, false) === null && changeText(null, true) === null && changeText(null, false) === null);
+
+    // 那句话写什么
+    const parts = { rainNote: "25 分钟后开始下雨", keypoint: "今日多云，气温适宜", delta: -6.5 };
+    check("彩云的一句话：原样；读不到就是 null", headlineText("keypoint", parts) === parts.keypoint && headlineText("keypoint", { ...parts, keypoint: null }) === null);
+    check("明日气温变化：总有一句（变化小也写「差不多」）；没有明天的数据就是 null", headlineText("change", parts) === "明日平均降温 7°C" && headlineText("change", { ...parts, delta: 0.2 }) === "明日气温和今天差不多" && headlineText("change", { ...parts, delta: null }) === null);
+    check("自动：有雨先说雨", headlineText("auto", parts) === parts.rainNote);
+    check("自动、没有雨：变化够大（≥ 3°，取整后算）就说变化，不够大用彩云的一句话", NOTABLE_CHANGE === 3 && headlineText("auto", { ...parts, rainNote: null }) === "明日平均降温 7°C" && headlineText("auto", { ...parts, rainNote: null, delta: -2.4 }) === parts.keypoint && headlineText("auto", { ...parts, rainNote: null, delta: -2.5 }) === "明日平均降温 3°C" && headlineText("auto", { ...parts, rainNote: null, delta: 3 }) === "明日平均升温 3°C" && headlineText("auto", { ...parts, rainNote: null, delta: null }) === parts.keypoint);
+    check("自动：什么都没有就是 null", headlineText("auto", { rainNote: null, keypoint: null, delta: null }) === null && headlineText("auto", { rainNote: null, keypoint: null, delta: 1 }) === null);
+
+    // 卡片上带哪些数据
+    const loaded: Loaded = { kind: "ok", forecast: base.forecast, extras: base.extras, alerts: base.alerts, provider: "caiyun", fetchedAt: NOW, place: "北京市", source: "live", refreshFailed: false, failure: null };
+    const plainLoaded: Loaded = { ...loaded, extras: null, alerts: null, provider: "openmeteo" };
+    const asCard = (content: Content) => {
+      if (content.kind !== "weather") throw new Error("应该是天气卡");
+      return content;
+    };
+    const show = (display: Partial<Display>, size: "compact" | "large" = "compact", from: Loaded = loaded) => asCard(present(from, NOW, size, undefined, { ...def, ...display }));
+    const withDays = (change: (days: DayForecast[]) => DayForecast[]): Loaded => ({ ...loaded, extras: { ...base.extras, days: change(clone(base.extras.days)) } });
+
+    const plain = show({});
+    check("默认样式：和原来一样，没有风湿度、没有几天、没有一句话", sameDisplay(plain.display, def) && plain.topItems.length === 0 && plain.dayColumns.length === 0 && plain.headline === null && plain.slots.length === 5);
+    check("底部几项数据（bottomStats）：默认是体感、湿度、风、空气；备用来源没有", plain.bottomStats.map((item) => item.label).join() === "体感,湿度,风,空气" && show({}, "compact", plainLoaded).bottomStats.length === 0);
+    check("detailOf 带出了这几样：5 列未来几天、风和湿度两项、明天比今天的气温差", (() => {
+      const detail = detailOf(base.extras);
+      return MEDIUM_DAYS === 5 && detail.dayColumns.length === 5 && detail.windHumidity.map((item) => item.label).join() === "风,湿度" && detail.tempChange === 0;
+    })());
+
+    const daily = show({ strip: "daily" });
+    check("中间一排选「未来几天」：明天起 5 天，每天星期、图标、最高、最低", daily.display.strip === "daily" && daily.dayColumns.map((c) => c.label).join() === "明天,后天,周四,周五,周六" && daily.dayColumns.map((c) => c.high).join() === "17°,14°,16°,10°,10°" && daily.dayColumns.map((c) => c.low).join() === "10°,10°,7°,5°,4°" && daily.dayColumns.map((c) => c.symbol).join() === "sun.max.fill,cloud.fill,sun.max.fill,sun.max.fill,cloud.fill");
+    check("选了「未来几天」，逐小时那几格还在（锁屏、小号照旧用）", daily.slots.length === 5 && daily.columns === 5);
+
+    const windy = show({ top: "windHumidity" });
+    check("右上选「风和湿度」：风（西南风 1级）和湿度（25%）两项", windy.display.top === "windHumidity" && windy.topItems.map((item) => item.label + " " + item.value).join("|") === "风 西南风 1级|湿度 25%");
+
+    check("右上已经写了风和湿度：底部那几项不再重复写它们（只剩体感、空气）", windy.bottomStats.map((item) => item.label).join() === "体感,空气");
+    check("右上选了「风和湿度」但有预警：右上那一行让给了徽章，风和湿度就还写在底部", (() => {
+      const withAlert = asCard(present(loaded, NOW, "compact", { kind: "ok", items: DEMO_ALERTS.slice(), fetchedAt: NOW, failure: null }, { ...def, top: "windHumidity" }));
+      return withAlert.alert !== null && withAlert.bottomStats.map((item) => item.label).join() === "体感,湿度,风,空气";
+    })());
+    check("风和湿度读不到、右上退回天气和降水概率：底部几项照旧", show({ top: "windHumidity" }, "compact", { ...loaded, extras: { ...base.extras, wind: null, humidity: null } }).bottomStats.map((item) => item.label).join() === "体感,空气");
+
+    const headline = show({ bottom: "headline" });
+    check("底部选「一句话」：自动 → 样例没有雨、气温没变化，写彩云的一句话；日出 06:45；空气 优 50（带分级 0）", headline.display.bottom === "headline" && headline.headline !== null && headline.headline.text === "今日多云，气温适宜" && said(headline.headline.sun) === "日出 06:45" && headline.headline.air !== null && headline.headline.air.label === "空气" && headline.headline.air.value === "优 50" && headline.headline.air.band === 0);
+    check("一句话的三种写法：彩云的一句话 / 明日气温变化", show({ bottom: "headline", headline: "keypoint" }).headline?.text === "今日多云，气温适宜" && show({ bottom: "headline", headline: "change" }).headline?.text === "明日气温和今天差不多");
+    check("自动：明天比今天冷了 10.5° 就写「明日平均降温 11°C」，暖了 3° 写「明日平均升温 3°C」", show({ bottom: "headline" }, "compact", withDays((days) => days.map((d, i) => (i === 1 ? { ...d, high: 5, low: 1 } : d)))).headline?.text === "明日平均降温 11°C" && show({ bottom: "headline" }, "compact", withDays((days) => days.map((d, i) => (i === 1 ? { ...d, high: 19, low: 14 } : d)))).headline?.text === "明日平均升温 3°C");
+    check("自动：未来两小时有雨，先说雨", show({ bottom: "headline" }, "compact", { ...loaded, extras: { ...base.extras, rainNote: "25 分钟后开始下雨" } }).headline?.text === "25 分钟后开始下雨");
+    check("底部选「不显示」：没有那一行的内容", show({ bottom: "none" }).display.bottom === "none" && show({ bottom: "none" }).headline === null);
+
+    // 画不出来的就退回默认
+    check("备用来源（没有详细数据）：选什么都按默认的样子画", (() => {
+      const card = show({ strip: "daily", top: "windHumidity", bottom: "headline", headline: "change" }, "compact", plainLoaded);
+      return sameDisplay(card.display, def) && card.topItems.length === 0 && card.dayColumns.length === 0 && card.headline === null;
+    })());
+    check("风和湿度都读不到：右上退回天气和降水概率；只缺一项：照样用风和湿度，只写读到的那项", (() => {
+      const none = show({ top: "windHumidity" }, "compact", { ...loaded, extras: { ...base.extras, wind: null, humidity: null } });
+      const half = show({ top: "windHumidity" }, "compact", { ...loaded, extras: { ...base.extras, wind: null } });
+      return none.display.top === "condition" && none.topItems.length === 0 && half.display.top === "windHumidity" && half.topItems.map((item) => item.label).join() === "湿度";
+    })());
+    check("没有明天的数据：中间那一排退回逐小时", (() => {
+      const card = show({ strip: "daily" }, "compact", withDays((days) => days.slice(0, 1)));
+      return card.display.strip === "hourly" && card.dayColumns.length === 0;
+    })());
+    check("明天起不够 5 天：有几天画几天", show({ strip: "daily" }, "compact", withDays((days) => days.slice(0, 3))).dayColumns.map((c) => c.label).join() === "明天,后天");
+    check("一句话、日落、空气三样都读不到：底部退回默认的几项数据", (() => {
+      const polar = adaptOk(SAMPLE, { coord: { latitude: 78, longitude: 15 }, now: Date.UTC(2026, 11, 21, 12) });
+      const card = show({ bottom: "headline", headline: "keypoint" }, "compact", { ...loaded, forecast: polar.forecast, extras: { ...base.extras, keypoint: null, aqi: null } });
+      return card.display.bottom === "stats" && card.headline === null;
+    })());
+    check("大号：中间一排和右上那一行不管选什么都按默认的；底部那一行照选的画", (() => {
+      const card = show({ strip: "daily", top: "windHumidity", bottom: "headline" }, "large");
+      return card.display.strip === "hourly" && card.display.top === "condition" && card.display.bottom === "headline" && card.dayColumns.length === 0 && card.topItems.length === 0 && card.headline !== null && card.slots.length === 6;
+    })());
+    check("effectiveDisplay：没有详细数据就是默认的；选「一句话」但这一行画不出东西，底部退回默认", (() => {
+      const detail = detailOf(base.extras);
+      return sameDisplay(effectiveDisplay(everything, "compact", null, null), def) && effectiveDisplay(everything, "compact", detail, null).bottom === "stats" && effectiveDisplay(everything, "compact", detail, { text: null, sun: null, air: null }).bottom === "headline";
+    })());
+  }
+
   // ---------------------------------------------------------------- 源码扫描
   section("源码扫描");
   {
@@ -670,8 +811,14 @@ async function main(): Promise<void> {
     check("数据来源的存储键只在 store.ts 里写一处；老版本的键只出现在清理名单里", files.filter((file) => /weather\.source\.v1/.test(read(file))).length === 1 && /weather\.source\.v1/.test(read(join(SCRIPT_DIR, "core", "store.ts"))) && files.filter((file) => /weather\.alert-source/.test(read(file))).length === 1);
     check("联网（fetch）只在 caiyun.ts 和 openmeteo.ts 里", files.filter((file) => /\bfetch\(/.test(codeOf(file))).map((file) => file.replace(/^.*[\\/]/, "")).sort().join() === "caiyun.ts,openmeteo.ts");
     check("碰存储（Storage.）只在 store.ts 里", files.filter((file) => /\bStorage\./.test(codeOf(file))).map((file) => file.replace(/^.*[\\/]/, "")).join() === "store.ts");
-    check("彩云那一层的纯逻辑文件（整理、日出日落、详细数据、失败原因、来源设置、预警状态）不碰系统", ["caiyunWeather.ts", "sun.ts", "extras.ts", "failure.ts", "dataSource.ts", "alertState.ts"].every((name) => !/\b(Storage|Location|Widget|Script|fetch)\b[.(]/.test(codeOf(join(SCRIPT_DIR, "core", name)))));
+    check("彩云那一层的纯逻辑文件（整理、日出日落、详细数据、失败原因、来源设置、预警状态）不碰系统", ["caiyunWeather.ts", "sun.ts", "extras.ts", "failure.ts", "dataSource.ts", "alertState.ts", "display.ts", "headline.ts"].every((name) => !/\b(Storage|Location|Widget|Script|fetch)\b[.(]/.test(codeOf(join(SCRIPT_DIR, "core", name)))));
     check("时间一律用手机的时钟：整理那一步不读 Date.now()（由调用方传进来，自测才能固定时间）", !/Date\.now\(\)/.test(codeOf(join(SCRIPT_DIR, "core", "caiyunWeather.ts"))) && !/Date\.now\(\)/.test(codeOf(join(SCRIPT_DIR, "core", "sun.ts"))));
+    const keys = [...read(join(SCRIPT_DIR, "core", "store.ts")).matchAll(/const (\w+_KEY) = "([^"]+)"/g)].map((match) => match[2]);
+    check("存储的键都不一样（显示样式的键不能和别的撞）", keys.length >= 6 && new Set(keys).size === keys.length && keys.includes("weather.display.v1"));
+    const widgetEntry = read(join(SCRIPT_DIR, "widget.tsx"));
+    const indexCode = read(join(SCRIPT_DIR, "index.tsx"));
+    check("显示样式接线：小组件读存下来的样式交给 present；脚本页的卡片预览用同一份；换样式时存下来、让小组件重画", /present\(loaded, now, size, alerts, loadDisplay\(\)\)/.test(widgetEntry) && /present\(loaded, now, "compact", alerts \?\? \{ kind: "off" \}, display\)/.test(indexCode) && /<DisplaySection display=\{display\} onChange=\{changeDisplay\} \/>/.test(indexCode) && /function changeDisplay\(next: Display\): void \{[\s\S]{0,200}saveDisplay\(next\);[\s\S]{0,80}Widget\.reloadAll\(\);/.test(indexCode));
+    check("显示样式不碰网络、不碰存储（只有 store.ts 碰）：display.ts、headline.ts 里没有 Storage / fetch", !/\b(Storage|fetch)\b/.test(codeOf(join(SCRIPT_DIR, "core", "display.ts"))) && !/\b(Storage|fetch)\b/.test(codeOf(join(SCRIPT_DIR, "core", "headline.ts"))));
   }
 
   (globalThis as unknown as { fetch: unknown }).fetch = realFetch;

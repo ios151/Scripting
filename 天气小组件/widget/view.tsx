@@ -8,7 +8,7 @@
 // 不指望系统给的内容边距，这样系统留不留边距、背景画在哪，版面都一样。
 
 import { ZStack } from "scripting";
-import { familyOf, metricsFor } from "../core/layout";
+import { familyOf, layoutVariant, metricsFor } from "../core/layout";
 import type { Content } from "../core/present";
 import { AccessoryView } from "./accessory";
 import { CardBody } from "./bodies";
@@ -34,7 +34,8 @@ export function WidgetView({
     return <AccessoryView family={layout} content={content} tapURL={tapURL} />;
   }
 
-  const m = metricsFor(layout, width, height);
+  // 中号选了「未来几天」或底部的「一句话」时，竖向放不下原来的字号，用紧凑的那套
+  const m = metricsFor(layout, width, height, layoutVariant(layout, content.kind === "weather" ? content.display : null));
   return (
     <ZStack
       frame={{ width, height }}

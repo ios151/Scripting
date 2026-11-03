@@ -8,7 +8,10 @@ import { alertSymbol, sortAlerts, type AlertLevel } from "./alerts";
 import type { AlertState } from "./alertState";
 import { conditionFor, type Condition, type Sky } from "./condition";
 import { ALERT_CLOCK_SKEW_MS, ALERT_MAX_AGE_MS } from "./config";
-import { aqiBand, aqiName, aqiShortName, windDirectionName, windLevel, type DayForecast, type Extras } from "./extras";
+import { defaultDisplay, type Display } from "./display";
+import { aqiBand, aqiName, aqiShortName, daysApart, windDirectionName, windLevel, type DayForecast, type Extras } from "./extras";
+import type { Forecast } from "./forecast";
+import { headlineText, nextSunEvent, temperatureChange, type SunView } from "./headline";
 import type { Loaded } from "./load";
 import { buildSnapshot, type Slot } from "./snapshot";
 
@@ -55,9 +58,21 @@ export type DayView = {
   to: number;
 };
 
+/** 中号「未来几天」那一排里的一天：星期、图标、最高、最低 */
+export type DayColumn = { key: string; label: string; symbol: string; high: string; low: string };
+
+/** 底部「一句话 + 日落 + 空气」那一行。三部分都可能读不到（null），都读不到整行就不画 */
+export type HeadlineView = { text: string | null; sun: SunView | null; air: StatView | null };
+
 export type Detail = {
   /** 一行放得下的几项：体感、湿度、风、空气（中号底部、大号底部） */
   stats: StatView[];
+  /** 右上那一行选了「风和湿度」时写的：风（「北风 4级」）、湿度（「94%」）；读不到的不写 */
+  windHumidity: StatView[];
+  /** 中号中间那一排选了「未来几天」时的几列：明天起最多 5 天 */
+  dayColumns: DayColumn[];
+  /** 明天比今天的平均气温高多少度（负数是冷了）；没有明天的数据是 null。底部的一句话用 */
+  tempChange: number | null;
   /** App 页「详细数据」：体感、湿度、风、云量、露点、气压、能见度、紫外线 */
   all: StatView[];
   /** App 页「空气质量」：国标指数，和 PM2.5、PM10、臭氧、二氧化氮、二氧化硫、一氧化碳的浓度 */
@@ -110,6 +125,19 @@ export type Card = {
   alert: AlertView | null;
   /** 详细数据；备用来源没有 */
   detail: Detail | null;
+  /** 真正画出来的显示样式：用户选的，减去这份数据画不出来的（见 `effectiveDisplay`） */
+  display: Display;
+  /** 右上那一行是「风和湿度」时的几项；否则是空的 */
+  topItems: StatView[];
+  /**
+   * 底部那一行选了几项数据（体感、湿度、风、空气）时画的那几项。右上那一行已经写了风和湿度时，这里不再重复写它们；
+   * 但有预警时右上那一行让给了徽章，风和湿度就还写在这里
+   */
+  bottomStats: StatView[];
+  /** 中间那一排是「未来几天」时的几列；否则是空的 */
+  dayColumns: DayColumn[];
+  /** 底部是「一句话」时的内容；否则是 null */
+  headline: HeadlineView | null;
 };
 
 export type Empty = {
@@ -209,13 +237,6 @@ export function weekdayOf(date: string): string {
   return WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
 }
 
-/** 「2026-11-04」距「2026-11-02」几天 */
-function daysApart(from: string, to: string): number {
-  const [fromYear, fromMonth, fromDay] = from.split("-").map(Number);
-  const [toYear, toMonth, toDay] = to.split("-").map(Number);
-  return Math.round((Date.UTC(toYear, toMonth - 1, toDay) - Date.UTC(fromYear, fromMonth - 1, fromDay)) / 86_400_000);
-}
-
 /** 「今天」「明天」「后天」，再往后是星期几。按日期算、不按第几项：中间缺了一天，后面的也不会错位 */
 function dayTitle(date: string, today: string): string {
   const gap = daysApart(today, date);
@@ -244,6 +265,9 @@ function dayExtra(day: DayForecast): string | null {
 }
 
 /** 一项都没有的详细数据也算详细数据（界面上只是没东西可画），所以备用来源和彩云来源用 `detail === null` 区分 */
+/** 中号「未来几天」那一排最多几天（明天起）；大号的几行是 LARGE_DAYS */
+export const MEDIUM_DAYS = 5;
+
 export function detailOf(extras: Extras): Detail {
   const apparent = extras.apparent === null ? null : degrees(extras.apparent);
   const humidity = extras.humidity === null ? null : extras.humidity + "%";
@@ -321,7 +345,30 @@ export function detailOf(extras: Extras): Detail {
     };
   });
 
-  return { stats, all, air: airRows, keypoint: extras.keypoint, dayOutlook: extras.dayOutlook, rainOutlook: extras.rainOutlook, rainNote: extras.rainNote, life, days, week };
+  const dayColumns: DayColumn[] = extras.days.slice(1, 1 + MEDIUM_DAYS).map((day) => ({
+    key: day.date,
+    label: dayTitle(day.date, today),
+    symbol: conditionFor(day.code === null ? -1 : day.code, true).symbol,
+    high: degrees(day.high),
+    low: degrees(day.low),
+  }));
+  const windHumidity = [...stat("wind", "风", wind), ...stat("humidity", "湿度", humidity)];
+
+  return {
+    stats,
+    windHumidity,
+    dayColumns,
+    tempChange: temperatureChange(extras.days),
+    all,
+    air: airRows,
+    keypoint: extras.keypoint,
+    dayOutlook: extras.dayOutlook,
+    rainOutlook: extras.rainOutlook,
+    rainNote: extras.rainNote,
+    life,
+    days,
+    week,
+  };
 }
 
 // ---------------------------------------------------------------- 预警
@@ -389,7 +436,31 @@ export const LARGE_PLAIN_SLOTS = 10;
 
 export type CardSize = "compact" | "large";
 
-export function present(loaded: Loaded, now: number, size: CardSize, alerts: AlertState = NO_ALERTS): Content {
+/** 底部「一句话 + 日落 + 空气」那一行的内容；三部分都读不到返回 null */
+function headlineOf(detail: Detail, forecast: Forecast, mode: Display["headline"]): HeadlineView | null {
+  const text = headlineText(mode, { rainNote: detail.rainNote, keypoint: detail.keypoint, delta: detail.tempChange });
+  const sun = nextSunEvent(forecast);
+  const air = detail.stats.find((item) => item.key === "air") ?? null;
+  return text === null && sun === null && air === null ? null : { text, sun, air };
+}
+
+/**
+ * 这份数据真正画得出来的显示样式：选了的数据没有（备用来源没有详细数据、没有明天的数据、读不到风和湿度……），
+ * 就退回默认的样子，免得画出一块空白。中间那一排和右上那一行只有中号用，大号一律是默认的。
+ */
+export function effectiveDisplay(requested: Display, size: CardSize, detail: Detail | null, headline: HeadlineView | null): Display {
+  const base = defaultDisplay();
+  if (detail === null) return base;
+  const medium = size === "compact";
+  return {
+    strip: medium && requested.strip === "daily" && detail.dayColumns.length > 0 ? "daily" : base.strip,
+    top: medium && requested.top === "windHumidity" && detail.windHumidity.length > 0 ? "windHumidity" : base.top,
+    bottom: requested.bottom === "headline" && headline === null ? base.bottom : requested.bottom,
+    headline: requested.headline,
+  };
+}
+
+export function present(loaded: Loaded, now: number, size: CardSize, alerts: AlertState = NO_ALERTS, display: Display = defaultDisplay()): Content {
   if (loaded.kind === "noLocation") return NO_LOCATION;
   if (loaded.kind === "noData") return NO_DATA;
 
@@ -409,6 +480,13 @@ export function present(loaded: Loaded, now: number, size: CardSize, alerts: Ale
     noteShort = "没刷新成功，显示旧数据";
   }
 
+  const headline = detail !== null && display.bottom === "headline" ? headlineOf(detail, loaded.forecast, display.headline) : null;
+  const shown = effectiveDisplay(display, size, detail, headline);
+
+  const alert = alertView(alerts, now);
+  const windHumidityOnTop = shown.top === "windHumidity" && alert === null;
+  const bottomStats = detail === null ? [] : windHumidityOnTop ? detail.stats.filter((item) => item.key !== "wind" && item.key !== "humidity") : detail.stats;
+
   const rain = snapshot.rainChance;
   return {
     kind: "weather",
@@ -426,7 +504,12 @@ export function present(loaded: Loaded, now: number, size: CardSize, alerts: Ale
     note,
     noteShort,
     inline: snapshot.condition.text + " " + degrees(snapshot.temperature) + " " + snapshot.low + "~" + degrees(snapshot.high),
-    alert: alertView(alerts, now),
+    alert,
     detail,
+    display: shown,
+    topItems: shown.top === "windHumidity" && detail !== null ? detail.windHumidity : [],
+    bottomStats,
+    dayColumns: shown.strip === "daily" && detail !== null ? detail.dayColumns : [],
+    headline: shown.bottom === "headline" ? headline : null,
   };
 }

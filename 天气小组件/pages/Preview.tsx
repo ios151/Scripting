@@ -2,7 +2,7 @@
 // 区别只有一处：背景用 `background`（App 里没有「染色模式」，不用 `widgetBackground`），再裁成圆角。
 
 import { Text, VStack, ZStack } from "scripting";
-import { metricsFor } from "../core/layout";
+import { layoutVariant, metricsFor } from "../core/layout";
 import type { Content } from "../core/present";
 import { CardBody } from "../widget/bodies";
 import { fullFrame } from "../widget/frame";
@@ -14,7 +14,7 @@ const CORNER = 22;
 
 export function PreviewCard({ content, width }: { content: Content; width: number }) {
   const height = Math.round(width * MEDIUM_RATIO);
-  const m = metricsFor("medium", width, height);
+  const m = metricsFor("medium", width, height, layoutVariant("medium", content.kind === "weather" ? content.display : null));
   return (
     <ZStack
       frame={{ width, height }}

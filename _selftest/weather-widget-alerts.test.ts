@@ -399,7 +399,8 @@ async function main(): Promise<void> {
     check("徽章不用 widgetBackground（染色模式下它会被藏起来）；用圆角方块 + 渐变填充 + 一圈淡亮线", !/widgetBackground/.test(codeOf(badgeCode)) && /RoundedRectangle/.test(badgeCode) && /alertBadge\(level\)/.test(badgeCode) && /ALERT_RIM/.test(badgeCode));
     check("徽章、预警行里没有三角形警告符号（不再用那个像 emoji 的图标）", !/triangle/.test(codeOf(partsCode)) && !/triangle/.test(codeOf(badgeCode)) && !/triangle/.test(codeOf(alertsPage)));
     check("锁屏：只有圆形里还用三角（单色、通用的警告符号，圆形里没地方写字）", (read(join(SCRIPT_DIR, "widget", "accessory.tsx")).match(/exclamationmark\.triangle/g) ?? []).length === 1);
-    check("徽章放的位置：小号换最高最低、中号换降水概率、大号在地名那一行", (bodiesCode.match(/<AlertChip/g) ?? []).length === 4);
+    // bodies.tsx：小号（换最高最低）、大号有详细数据、大号没有详细数据（都在地名那一行）；中号的右上那一行在 parts.tsx 的 TopLine 里，两种样式各一处
+    check("徽章放的位置：小号换最高最低、中号换右上那一行里的降水概率（或风和湿度）、大号在地名那一行", (bodiesCode.match(/<AlertChip/g) ?? []).length === 3 && (partsCode.match(/<AlertChip/g) ?? []).length === 2);
     check("来源有三个选项：内置、自己的、Open-Meteo（备用）", /tag="builtin"/.test(sourcePage) && /tag="custom"/.test(sourcePage) && /tag="openmeteo"/.test(sourcePage));
     check("只在选了「自己的」时才出现地址和 token 输入框", /custom \? \(\s*<TextField/.test(sourcePage) && /custom \? \(\s*<SecureField/.test(sourcePage));
     check("数据来源里写了「001 提供 API 接口」，没有写地址", /001 提供 API 接口/.test(indexCode) && !indexCode.includes(hostName) && !sourcePage.includes(hostName) && !alertsPage.includes(hostName));

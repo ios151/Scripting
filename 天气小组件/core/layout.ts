@@ -7,7 +7,20 @@
 // 内缩（`inset`）也由我们自己说了算，不指望系统给的内容边距：根视图撑成 `Widget.displaySize` 的满尺寸，
 // 内容离边缘多远只看 `inset`（见 widget/frame.tsx）。系统有没有另外留边距，版面都一样。
 
+import type { Display } from "./display";
+
 export type Family = "small" | "medium" | "large" | "circular" | "rectangular" | "inline";
+
+/**
+ * 同一个尺寸的两套字号：standard 是原来的；compact 只有中号有，字号小一点、行距紧一点。
+ * 中号选了「未来几天」那一排（多一行高低温）或者底部的「一句话」（那一行的字大），竖向放不下 standard，就用 compact。
+ */
+export type LayoutVariant = "standard" | "compact";
+
+/** 这个尺寸、这份显示样式该用哪套字号。只有中号会用 compact */
+export function layoutVariant(family: string, display: Display | null): LayoutVariant {
+  return family === "medium" && display !== null && (display.strip === "daily" || display.bottom === "headline") ? "compact" : "standard";
+}
 
 /** 系统小组件的参考尺寸（宽、高） */
 const REFERENCE: Readonly<Record<"small" | "medium" | "large", readonly [number, number]>> = {
@@ -88,6 +101,16 @@ export type Metrics = {
   bar: number;
   /** 中号左栏宽度 */
   leftWidth: number;
+  /** 右上那一行选了「风和湿度」时的字号（中号） */
+  top: number;
+  /** 底部「一句话」的字号，和旁边日落、空气两项的字号（中号 compact、大号） */
+  headline: number;
+  item: number;
+  /** 中号「未来几天」那一排里，最高、最低气温的字号（compact） */
+  dayHigh: number;
+  dayLow: number;
+  /** 天气图标挪到气温旁边时的大小（中号，右上那一行选了「风和湿度」时） */
+  bigIcon: number;
   /** 内容区的宽度（扣掉左右内缩）：温度条的长度要按它算 */
   contentWidth: number;
 };
@@ -117,6 +140,12 @@ const BASE: Readonly<Record<"small" | "medium" | "large", Base>> = {
     dayGap: 0,
     bar: 0,
     leftWidth: 0,
+    top: 0,
+    headline: 0,
+    item: 0,
+    dayHigh: 0,
+    dayLow: 0,
+    bigIcon: 0,
   },
   medium: {
     gap: 3,
@@ -140,6 +169,12 @@ const BASE: Readonly<Record<"small" | "medium" | "large", Base>> = {
     dayGap: 0,
     bar: 0,
     leftWidth: 112,
+    top: 12,
+    headline: 0,
+    item: 0,
+    dayHigh: 0,
+    dayLow: 0,
+    bigIcon: 30,
   },
   large: {
     gap: 6,
@@ -163,7 +198,44 @@ const BASE: Readonly<Record<"small" | "medium" | "large", Base>> = {
     dayGap: 3,
     bar: 4,
     leftWidth: 0,
+    top: 0,
+    headline: 15,
+    item: 12,
+    dayHigh: 0,
+    dayLow: 0,
+    bigIcon: 0,
   },
+};
+
+/** 中号的紧凑版（见 `LayoutVariant`）：气温、图标、逐小时的字号和行距都收一点，腾出竖向的地方给高低温那一行和「一句话」 */
+const MEDIUM_COMPACT: Base = {
+  gap: 2,
+  place: 13,
+  placeArrow: 9,
+  temp: 40,
+  cond: 12,
+  rain: 11,
+  range: 11,
+  icon: 14,
+  slotLabel: 10,
+  slotIcon: 15,
+  slotIconBox: 17,
+  slotText: 12,
+  slotGap: 2,
+  rowGap: 6,
+  stat: 11,
+  day: 0,
+  dayIcon: 0,
+  dayRow: 0,
+  dayGap: 0,
+  bar: 0,
+  leftWidth: 112,
+  top: 12,
+  headline: 16,
+  item: 12,
+  dayHigh: 12,
+  dayLow: 11,
+  bigIcon: 28,
 };
 
 /** 字号不低于这个值：再小就是缩成了蚂蚁 */
@@ -183,13 +255,14 @@ function usable(value: number, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-export function metricsFor(family: "small" | "medium" | "large", width: number, height: number): Metrics {
+export function metricsFor(family: "small" | "medium" | "large", width: number, height: number, variant: LayoutVariant = "standard"): Metrics {
   const [refWidth, refHeight] = REFERENCE[family];
   const scale = clamp(Math.min(usable(width, refWidth) / refWidth, usable(height, refHeight) / refHeight), 0.7, 2.4);
-  const base = BASE[family];
+  const base = family === "medium" && variant === "compact" ? MEDIUM_COMPACT : BASE[family];
   // 字号不低于 MIN_FONT；值是 0 的（这个尺寸里没有这一项）保持 0
   const fonts: ReadonlyArray<keyof Base> = [
     "place", "placeArrow", "temp", "cond", "rain", "range", "icon", "slotLabel", "slotIcon", "slotText", "stat", "day", "dayIcon",
+    "top", "headline", "item", "dayHigh", "dayLow", "bigIcon",
   ];
   const inset = half(CONTENT_MARGIN * scale);
   const out: Record<string, number> = { scale, inset, contentWidth: half(usable(width, refWidth) - 2 * inset) };

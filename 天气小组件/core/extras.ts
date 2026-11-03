@@ -192,6 +192,13 @@ export function parseExtras(raw: unknown): Extras | null {
 
 // ---------------------------------------------------------------- 换算
 
+/** 「2026-11-04」距「2026-11-02」几天：后一个日期晚就是正数。按日历算，跨月、跨年都对 */
+export function daysApart(from: string, to: string): number {
+  const [fromYear, fromMonth, fromDay] = from.split("-").map(Number);
+  const [toYear, toMonth, toDay] = to.split("-").map(Number);
+  return Math.round((Date.UTC(toYear, toMonth - 1, toDay) - Date.UTC(fromYear, fromMonth - 1, fromDay)) / 86_400_000);
+}
+
 /** 风力等级各级的下限（m/s），第 i 项是 i+1 级的下限：国内天气预报说的「几级风」 */
 const WIND_LEVEL_FLOORS = [0.3, 1.6, 3.4, 5.5, 8.0, 10.8, 13.9, 17.2, 20.8, 24.5, 28.5, 32.7];
 
