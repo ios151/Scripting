@@ -4,17 +4,22 @@
 
 import { isValidCoord, type Coord } from "./geo";
 
-/** 固定城市：用户在 App 页里查好的一个地点 */
-export type FixedPlace = Coord & { name: string };
+/** 地名写到哪一级：city 是城市（「北京市」）；district 是区县（「海淀区」），系统没给出区县时退回城市 */
+export type PlaceLevel = "city" | "district";
+
+/** 固定城市：用户在 App 页里查好的一个地点。`district` 是查到它时系统给的区县名，没有就不带 */
+export type FixedPlace = Coord & { name: string; district?: string };
 
 export type Settings = {
   /** current：跟着当前定位走；fixed：固定看一个城市 */
   mode: "current" | "fixed";
   fixed: FixedPlace | null;
+  /** 标题里的地名写到哪一级 */
+  placeLevel: PlaceLevel;
 };
 
 export function defaultSettings(): Settings {
-  return { mode: "current", fixed: null };
+  return { mode: "current", fixed: null, placeLevel: "city" };
 }
 
 const MAX_NAME = 24;
@@ -31,11 +36,22 @@ export function parseSettings(raw: unknown): Settings {
   const fixedRaw = record.fixed;
   let fixed: FixedPlace | null = null;
   if (isValidCoord(fixedRaw)) {
-    const name = cleanName((fixedRaw as unknown as Record<string, unknown>).name);
-    if (name !== null) fixed = { name, latitude: fixedRaw.latitude, longitude: fixedRaw.longitude };
+    const fields = fixedRaw as unknown as Record<string, unknown>;
+    const name = cleanName(fields.name);
+    const district = cleanName(fields.district);
+    if (name !== null) {
+      fixed =
+        district === null
+          ? { name, latitude: fixedRaw.latitude, longitude: fixedRaw.longitude }
+          : { name, district, latitude: fixedRaw.latitude, longitude: fixedRaw.longitude };
+    }
   }
   // 说是固定城市、却没有可用的城市：按跟着定位走，别画一张空卡
-  return { mode: record.mode === "fixed" && fixed !== null ? "fixed" : "current", fixed };
+  return {
+    mode: record.mode === "fixed" && fixed !== null ? "fixed" : "current",
+    fixed,
+    placeLevel: record.placeLevel === "district" ? "district" : "city",
+  };
 }
 
 /** 小组件参数里写的地点 */

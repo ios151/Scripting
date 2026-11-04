@@ -28,13 +28,13 @@ import { loadWeather, type Deps, type Input, type Loaded } from "../天气小组
 import { ENDPOINT, ForecastError, buildURL, fetchForecast, roundedForRequest } from "../天气小组件/core/openmeteo";
 import { AQI_COLOR, RAIN_TEXT, SKY, TEXT_SECONDARY_ALPHA } from "../天气小组件/core/palette";
 import { LARGE_DAYS, NO_DATA, NO_LOCATION, present, rangeText, updatedText } from "../天气小组件/core/present";
-import { FRESHNESS_MS, MOVE_THRESHOLD_M, isFresh, nameStillApplies } from "../天气小组件/core/refresh";
+import { DISTRICT_NAME_THRESHOLD_M, FRESHNESS_MS, MOVE_THRESHOLD_M, isFresh, nameStillApplies } from "../天气小组件/core/refresh";
 import { nextReloadAt } from "../天气小组件/core/schedule";
-import { defaultSettings, parseParameter, parseSettings, type Settings } from "../天气小组件/core/settings";
+import { defaultSettings, parseParameter, parseSettings, type PlaceLevel, type Settings } from "../天气小组件/core/settings";
 import { SLOT_COUNT, buildSnapshot, localParts, parseLocalTime, roundAway, type Snapshot } from "../天气小组件/core/snapshot";
-import { cityName, pickPlace } from "../天气小组件/core/place";
+import { cityName, districtName, pickPlace, placeLabel, placeParts, type PlacemarkLike } from "../天气小组件/core/place";
 import { RELOAD_AFTER_MS, RELOAD_RETRY_MS } from "../天气小组件/core/config";
-import { fetchWeatherWithin, withTimeout } from "../天气小组件/core/system";
+import { fetchWeatherWithin, findPlace, reverseName, withTimeout } from "../天气小组件/core/system";
 
 let passed = 0;
 let failed = 0;
@@ -338,6 +338,8 @@ async function main(): Promise<void> {
     check("取到的时刻在未来（时钟被往回拨过）算旧", !isFresh({ fetchedAt: T0 + 3_600_000, anchor: beijing }, beijing, T0));
     check("地名：没名字 / 没锚点不适用", !nameStillApplies(beijing, null, beijing) && !nameStillApplies(beijing, "", beijing) && !nameStillApplies(null, "北京", beijing));
     check("地名：5 公里内适用、超过不适用", nameStillApplies(beijing, "北京", north(0.04)) && !nameStillApplies(beijing, "北京", north(0.05)));
+    check("地名写到区县：2 公里内适用、超过不适用；写到城市还是 5 公里", nameStillApplies(beijing, "海淀区", north(0.017), "district") && !nameStillApplies(beijing, "海淀区", north(0.019), "district") && nameStillApplies(beijing, "北京", north(0.019), "city") && nameStillApplies(beijing, "北京", north(0.019)) && DISTRICT_NAME_THRESHOLD_M === 2000 && DISTRICT_NAME_THRESHOLD_M < MOVE_THRESHOLD_M);
+    check("地名写到区县：没名字 / 没锚点照样不适用", !nameStillApplies(beijing, null, beijing, "district") && !nameStillApplies(beijing, "", beijing, "district") && !nameStillApplies(null, "海淀区", beijing, "district"));
   }
 
   // ---------------------------------------------------------------- 取天气的整条退路
@@ -354,10 +356,14 @@ async function main(): Promise<void> {
       live: Coord | null | "throw";
       fetchMode: "ok" | "fail" | "throw";
       name: string | null | "throw";
+      /** 反查时系统给的区县名（默认没有） */
+      district: string | null;
       cache: Cache | null;
       location: StoredLocation | null;
       calls: { live: number; fetch: number; name: number; writeCache: number };
       lastFetchAt: Coord | null;
+      /** 反查最后一次是对着哪个位置查的 */
+      lastNameAt: Coord | null;
       /** 现在用哪个来源；彩云的返回带详细数据和预警，Open-Meteo 的没有 */
       provider: Provider;
       /** 联网那一步最后一次收到的「上一次的预报」 */
@@ -373,7 +379,7 @@ async function main(): Promise<void> {
     };
 
     function world(overrides: Partial<World> = {}): { w: World; deps: Deps } {
-      const w: World = { now: T0, live: beijing, fetchMode: "ok", name: "北京", cache: null, location: null, calls: { live: 0, fetch: 0, name: 0, writeCache: 0 }, lastFetchAt: null, provider: "openmeteo", lastPrevious: null, ...overrides };
+      const w: World = { now: T0, live: beijing, fetchMode: "ok", name: "北京", district: null, cache: null, location: null, calls: { live: 0, fetch: 0, name: 0, writeCache: 0 }, lastFetchAt: null, lastNameAt: null, provider: "openmeteo", lastPrevious: null, ...overrides };
       const deps: Deps = {
         now: () => w.now,
         readCache: () => w.cache,
@@ -401,10 +407,11 @@ async function main(): Promise<void> {
             ? { forecast: clone(base), extras: clone(EXTRAS), alerts: { items: [], failure: null } }
             : { forecast: clone(base), extras: null, alerts: null };
         },
-        reverseName: async () => {
+        reverseName: async (coord) => {
           w.calls.name++;
+          w.lastNameAt = coord;
           if (w.name === "throw") throw new Error("反查失败");
-          return w.name;
+          return w.name === null ? null : { city: w.name, district: w.district };
         },
       };
       return { w, deps };
@@ -507,7 +514,7 @@ async function main(): Promise<void> {
     }
     // j. 固定城市：不定位、不反查
     {
-      const fixed: Settings = { mode: "fixed", fixed: { name: "北京", latitude: 39.9042, longitude: 116.4074 } };
+      const fixed: Settings = { ...defaultSettings(), mode: "fixed", fixed: { name: "北京", latitude: 39.9042, longitude: 116.4074 } };
       const { w, deps } = world();
       const loaded = ok(await loadWeather(deps, { ...auto, settings: fixed }));
       check("j 固定城市：不现场定位、不反查，用设置里的名字", w.calls.live === 0 && w.calls.name === 0 && loaded.place === "北京" && loaded.source === "fixed");
@@ -516,7 +523,7 @@ async function main(): Promise<void> {
     }
     // k. 小组件参数 > 固定城市；没带名字就要反查
     {
-      const fixed: Settings = { mode: "fixed", fixed: { name: "北京", latitude: 39.9042, longitude: 116.4074 } };
+      const fixed: Settings = { ...defaultSettings(), mode: "fixed", fixed: { name: "北京", latitude: 39.9042, longitude: 116.4074 } };
       const named = world();
       const a = ok(await loadWeather(named.deps, { settings: fixed, parameter: { latitude: 31.23, longitude: 121.47, name: "上海" }, force: false }));
       check("k 参数优先于固定城市，带名字就不反查", a.place === "上海" && a.source === "param" && named.w.calls.name === 0 && named.w.calls.live === 0);
@@ -614,6 +621,208 @@ async function main(): Promise<void> {
       await loadWeather(deps, { ...auto, force: true });
       check("r 在新地方强制刷新：上一次的预报就是新地方的，又交过去", w.lastPrevious !== null);
     }
+    // s. 地名写到哪一级（城市 / 区县）
+    {
+      const byDistrict: Input = { ...auto, settings: { ...defaultSettings(), placeLevel: "district" } };
+      const hai = (overrides: Partial<World> = {}) => world({ name: "北京市", district: "海淀区", ...overrides });
+      // 写到区县：标题写区县，缓存里城市和区县各记各的
+      {
+        const { w, deps } = hai();
+        const loaded = ok(await loadWeather(deps, byDistrict));
+        check("s 写到区县：标题写区县；缓存里城市和区县各记各的", loaded.place === "海淀区" && w.calls.name === 1 && w.cache !== null && w.cache.place === "北京市" && w.cache.district === "海淀区");
+        w.now = T0 + minutes(1);
+        const back = ok(await loadWeather(deps, auto));
+        check("s 换回城市：缓存里本来就有，不联网、不再反查，标题改写城市", back.place === "北京市" && w.calls.fetch === 1 && w.calls.name === 1);
+        const again = ok(await loadWeather(deps, byDistrict));
+        check("s 再换成区县：同样不联网、不反查", again.place === "海淀区" && w.calls.fetch === 1 && w.calls.name === 1);
+      }
+      // 系统没给区县：退回城市，而且记下「反查过、没有」，不会每次都再查
+      {
+        const { w, deps } = hai({ district: null });
+        const loaded = ok(await loadWeather(deps, byDistrict));
+        check("s 写到区县、系统没给区县：标题退回城市；缓存里区县是 null（反查过、没有）", loaded.place === "北京市" && w.cache !== null && w.cache.district === null);
+        w.now = T0 + minutes(1);
+        const again = ok(await loadWeather(deps, byDistrict));
+        check("s 反查过没有区县的：缓存还新时不再反查", again.place === "北京市" && w.calls.name === 1);
+      }
+      // 老版本写的缓存没有区县这一项：改成写到区县时补查一次
+      {
+        const { w, deps } = hai();
+        await loadWeather(deps, auto);
+        if (w.cache !== null) delete w.cache.district;
+        w.now = T0 + minutes(1);
+        const loaded = ok(await loadWeather(deps, byDistrict));
+        check("s 缓存没有区县这一项（旧版本写的）、改成写到区县：补查一次地名，不联网天气", loaded.place === "海淀区" && w.calls.name === 2 && w.calls.fetch === 1 && w.cache !== null && w.cache.district === "海淀区");
+        if (w.cache !== null) delete w.cache.district;
+        w.now = T0 + minutes(30);
+        const refetch = ok(await loadWeather(deps, byDistrict));
+        check("s 缓存过期要重查、又没有区县这一项：天气和地名一起重查", refetch.place === "海淀区" && w.calls.name === 3 && w.calls.fetch === 2);
+      }
+      // 挪出 3 公里：写到区县要重新反查（区县的边界近），写到城市不用
+      {
+        const inDistrict = hai();
+        await loadWeather(inDistrict.deps, byDistrict);
+        inDistrict.w.now = T0 + minutes(16);
+        inDistrict.w.live = north(0.027);
+        inDistrict.w.district = "西城区";
+        const moved = ok(await loadWeather(inDistrict.deps, byDistrict));
+        check("s 写到区县：挪出 3 公里（天气过期了要重查）就重新反查，换成新区县", inDistrict.w.calls.name === 2 && moved.place === "西城区" && inDistrict.w.cache?.district === "西城区");
+        check("s 重查路径上反查也是对着现在的位置查的", inDistrict.w.lastNameAt !== null && Math.abs(inDistrict.w.lastNameAt.latitude - north(0.027).latitude) < 1e-9);
+        const inCity = hai();
+        await loadWeather(inCity.deps, auto);
+        inCity.w.now = T0 + minutes(16);
+        inCity.w.live = north(0.027);
+        inCity.w.district = "西城区";
+        const stays = ok(await loadWeather(inCity.deps, auto));
+        check("s 写到城市：同样挪 3 公里不重新反查（城市的界线是 5 公里）", inCity.w.calls.name === 1 && stays.place === "北京市");
+        const near = hai();
+        await loadWeather(near.deps, byDistrict);
+        near.w.now = T0 + minutes(16);
+        near.w.live = north(0.009);
+        await loadWeather(near.deps, byDistrict);
+        check("s 写到区县：只挪了 1 公里不重新反查", near.w.calls.name === 1);
+        near.w.now = T0 + minutes(17);
+        const next = ok(await loadWeather(near.deps, byDistrict));
+        check("s 重查了天气、地名沿用的那一次，缓存里的区县也沿用：下一次不用补查", next.place === "海淀区" && near.w.calls.name === 1 && near.w.cache?.district === "海淀区");
+      }
+      // 固定城市：名字是设置里存的，不反查；区县跟着设置走
+      {
+        const fixedInput = (placeLevel: PlaceLevel, withDistrict: boolean): Input => ({
+          ...auto,
+          settings: { mode: "fixed", fixed: withDistrict ? { name: "北京市", district: "海淀区", latitude: 39.99, longitude: 116.31 } : { name: "北京市", latitude: 39.9, longitude: 116.4 }, placeLevel },
+        });
+        const city = hai();
+        const district = hai();
+        const none = hai();
+        const a = ok(await loadWeather(city.deps, fixedInput("city", true)));
+        const b = ok(await loadWeather(district.deps, fixedInput("district", true)));
+        const c2 = ok(await loadWeather(none.deps, fixedInput("district", false)));
+        check("s 固定城市带着区县：写到城市写城市，写到区县写区县；都不反查", a.place === "北京市" && b.place === "海淀区" && city.w.calls.name === 0 && district.w.calls.name === 0);
+        check("s 固定城市没有区县名：写到区县也只能写城市", c2.place === "北京市" && none.w.calls.name === 0);
+        district.w.now = T0 + minutes(1);
+        const bAgain = ok(await loadWeather(district.deps, fixedInput("district", true)));
+        city.w.now = T0 + minutes(1);
+        const aAgain = ok(await loadWeather(city.deps, fixedInput("city", true)));
+        check("s 固定城市缓存还新时（不联网）：标题也按选的那一级", bAgain.place === "海淀区" && aAgain.place === "北京市" && district.w.calls.fetch === 1 && city.w.calls.fetch === 1);
+        const cold = hai({ fetchMode: "fail" });
+        const noData = await loadWeather(cold.deps, fixedInput("district", true));
+        check("s 固定城市联网失败又没有缓存：「天气暂时取不到」带的地名也按选的那一级", noData.kind === "noData" && noData.place === "海淀区");
+        check("s 固定城市自带名字：缓存里记着城市级的名字和它带的区县（和反查来的存法一样）；没有区县的就不记这一项", district.w.cache !== null && district.w.cache.place === "北京市" && district.w.cache.district === "海淀区" && none.w.cache !== null && none.w.cache.place === "北京市" && !("district" in none.w.cache));
+        // 固定城市写到区县之后换成跟着定位：就在固定城市旁边，写到城市时标题是城市，不能一直是区县
+        {
+          const sw = hai();
+          await loadWeather(sw.deps, fixedInput("district", true));
+          sw.w.live = { latitude: 39.99, longitude: 116.31 };
+          sw.w.now = T0 + minutes(20);
+          const cityAgain = ok(await loadWeather(sw.deps, auto));
+          check("s 固定城市（写到区县）换成跟着定位、写到城市：标题是城市不是区县，不用反查", cityAgain.place === "北京市" && sw.w.calls.name === 0);
+          sw.w.now = T0 + minutes(40);
+          const districtAgain = ok(await loadWeather(sw.deps, byDistrict));
+          check("s 同一个地方写到区县：固定城市带着的区县名就当查过了，不再反查", districtAgain.place === "海淀区" && sw.w.calls.name === 0);
+          const bare = hai();
+          await loadWeather(bare.deps, fixedInput("district", false));
+          bare.w.live = { latitude: 39.9, longitude: 116.4 };
+          bare.w.now = T0 + minutes(20);
+          const looked = ok(await loadWeather(bare.deps, byDistrict));
+          check("s 固定城市没带区县名、换成跟着定位写到区县：缓存里没有区县这一项，补查一次", looked.place === "海淀区" && bare.w.calls.name === 1);
+        }
+      }
+      // 小组件参数自带名字：不受影响
+      {
+        const { w, deps } = hai();
+        const loaded = ok(await loadWeather(deps, { settings: { ...defaultSettings(), placeLevel: "district" }, parameter: { latitude: 31.23, longitude: 121.47, name: "上海" }, force: false }));
+        check("s 小组件参数自带名字：不管写到哪一级都照写", loaded.place === "上海" && w.calls.name === 0);
+      }
+      // 联网失败：退回缓存时，标题也按选的那一级
+      {
+        const { w, deps } = hai();
+        await loadWeather(deps, byDistrict);
+        w.now = T0 + minutes(30);
+        w.fetchMode = "fail";
+        const district = ok(await loadWeather(deps, byDistrict));
+        const city = ok(await loadWeather(deps, auto));
+        check("s 联网失败退回缓存：标题按选的那一级（区县 / 城市）", district.refreshFailed && district.place === "海淀区" && city.refreshFailed && city.place === "北京市");
+      }
+      // 第一次没反查到，缓存还新时补上：城市和区县一起补
+      {
+        const { w, deps } = hai({ name: null });
+        const first = ok(await loadWeather(deps, byDistrict));
+        w.name = "北京市";
+        w.now = T0 + minutes(3);
+        const second = ok(await loadWeather(deps, byDistrict));
+        check("s 第一次没反查到、缓存还新：补查时城市和区县一起补上并写回，不联网天气", first.place === null && second.place === "海淀区" && w.cache?.place === "北京市" && w.cache?.district === "海淀区" && w.calls.fetch === 1);
+      }
+      // 只有区县、没有城市（系统很少这么给）：写到城市也不留空
+      {
+        const { deps } = hai();
+        const onlyDistrict: Deps = { ...deps, reverseName: async () => ({ city: null, district: "海淀区" }) };
+        const loaded = ok(await loadWeather(onlyDistrict, auto));
+        check("s 系统只给了区县、没给城市：写到城市也不留空，用区县顶上", loaded.place === "海淀区");
+      }
+
+      // 缓存还新（快路径）：人挪出 2 公里，写到区县就补查（对着现在的位置查）；写到城市还是 5 公里
+      {
+        const inDistrict = hai();
+        await loadWeather(inDistrict.deps, byDistrict);
+        inDistrict.w.now = T0 + minutes(5);
+        inDistrict.w.live = north(0.027);
+        inDistrict.w.district = "西城区";
+        const moved = ok(await loadWeather(inDistrict.deps, byDistrict));
+        check("s 缓存还新、写到区县：人挪出 3 公里，补查一次（不联网天气），标题换成新区县", moved.place === "西城区" && inDistrict.w.calls.name === 2 && inDistrict.w.calls.fetch === 1);
+        check("s 补查对着现在的位置查（不是缓存里老的那个位置）", inDistrict.w.lastNameAt !== null && Math.abs(inDistrict.w.lastNameAt.latitude - north(0.027).latitude) < 1e-9);
+        check("s 补查对着现在的位置：缓存里地名的锚点跟着挪过来", (() => {
+          const anchor = inDistrict.w.cache?.placeAnchor;
+          return anchor !== null && anchor !== undefined && Math.abs(anchor.latitude - north(0.027).latitude) < 1e-9;
+        })());
+        inDistrict.w.now = T0 + minutes(6);
+        await loadWeather(inDistrict.deps, byDistrict);
+        check("s 再来一次就不用补查了", inDistrict.w.calls.name === 2);
+        const inCity = hai();
+        await loadWeather(inCity.deps, auto);
+        inCity.w.now = T0 + minutes(5);
+        inCity.w.live = north(0.027);
+        const stays = ok(await loadWeather(inCity.deps, auto));
+        check("s 缓存还新、写到城市：挪 3 公里不补查", stays.place === "北京市" && inCity.w.calls.name === 1);
+      }
+      // 固定城市换成跟着定位：两处相距 3 公里，写到区县时标题不能直接用固定城市带的区县
+      {
+        const { w, deps } = hai({ district: "朝阳区" });
+        const fixedHere: Input = { ...auto, settings: { mode: "fixed", fixed: { name: "北京市", district: "海淀区", latitude: 39.9, longitude: 116.4 }, placeLevel: "city" } };
+        await loadWeather(deps, fixedHere);
+        w.live = north(0.027);
+        w.now = T0 + minutes(5);
+        const loaded = ok(await loadWeather(deps, byDistrict));
+        check("s 固定城市（带区县）换成跟着定位、写到区县，两处相距 3 公里：对着现在的位置查，不用固定城市的区县", loaded.place === "朝阳区" && w.calls.name === 1);
+      }
+      // 反查没成功：城市名还适用就留着
+      {
+        const { w, deps } = hai();
+        await loadWeather(deps, auto);
+        if (w.cache !== null) delete w.cache.district;
+        w.now = T0 + minutes(20);
+        w.name = null;
+        const kept = ok(await loadWeather(deps, byDistrict));
+        check("s 写到区县、缓存缺区县这一项、重查路径上反查没成功：城市名还适用，留着（不退成「当前位置」）；区县记「没查过」", kept.place === "北京市" && w.cache !== null && w.cache.place === "北京市" && w.cache.placeAnchor !== null && !("district" in w.cache));
+        w.name = "北京市";
+        w.now = T0 + minutes(21);
+        const again = ok(await loadWeather(deps, byDistrict));
+        check("s 下一次反查成功：补上区县", again.place === "海淀区" && w.cache?.district === "海淀区");
+        const far = hai();
+        await loadWeather(far.deps, byDistrict);
+        far.w.now = T0 + minutes(20);
+        far.w.live = north(0.027);
+        far.w.name = null;
+        const stillCity = ok(await loadWeather(far.deps, byDistrict));
+        check("s 写到区县、挪出 3 公里、反查没成功：城市名还适用（5 公里内），留着", stillCity.place === "北京市" && far.w.cache?.place === "北京市" && far.w.cache?.placeAnchor !== null);
+        const gone = hai();
+        await loadWeather(gone.deps, byDistrict);
+        gone.w.now = T0 + minutes(20);
+        gone.w.live = north(0.1);
+        gone.w.name = null;
+        const lost = ok(await loadWeather(gone.deps, byDistrict));
+        check("s 写到区县、挪出 11 公里、反查没成功：城市名也不适用了，退回「当前位置」", lost.place === null && gone.w.cache?.place === null && gone.w.cache?.placeAnchor === null);
+      }
+    }
     // 排程
     {
       const healthy: Loaded = { kind: "ok", forecast: base, extras: null, alerts: null, provider: "openmeteo", fetchedAt: T0, place: null, source: "live", refreshFailed: false, failure: null };
@@ -682,6 +891,48 @@ async function main(): Promise<void> {
     (globalThis as unknown as { fetch: unknown }).fetch = realFetch;
   }
 
+  // ---------------------------------------------------------------- 反查地名（系统那一层）
+  section("反查地名：城市和区县两级");
+  {
+    const globals = globalThis as unknown as { Location?: unknown };
+    const original = globals.Location;
+    const fakeLocation = (reverse: unknown, geocode: unknown = async () => null) => {
+      globals.Location = { reverseGeocode: reverse, geocodeAddress: geocode };
+    };
+    const beijing: Coord = { latitude: 39.9, longitude: 116.4 };
+    let seen: unknown = null;
+    fakeLocation(async (options: unknown) => {
+      seen = options;
+      return [{ locality: "北京市", subLocality: "海淀区", administrativeArea: "北京市" }];
+    });
+    check("反查：城市和区县两级都带回来", JSON.stringify(await reverseName(beijing, 500)) === JSON.stringify({ city: "北京市", district: "海淀区" }));
+    check("反查：请求里带着坐标和中文区域（地名才是中文）", JSON.stringify(seen) === JSON.stringify({ latitude: 39.9, longitude: 116.4, locale: "zh-CN" }));
+    fakeLocation(async () => [{ locality: "北京市" }]);
+    check("反查：系统没给区县，区县是 null", JSON.stringify(await reverseName(beijing, 500)) === JSON.stringify({ city: "北京市", district: null }));
+    fakeLocation(async () => [{ subLocality: "海淀区" }]);
+    check("反查：只有区县也带回来", JSON.stringify(await reverseName(beijing, 500)) === JSON.stringify({ city: null, district: "海淀区" }));
+    fakeLocation(async () => [{}]);
+    check("反查：一个名字都没有是 null", (await reverseName(beijing, 500)) === null);
+    fakeLocation(async () => []);
+    check("反查：空结果是 null", (await reverseName(beijing, 500)) === null);
+    fakeLocation(async () => null);
+    check("反查：系统回 null 就是 null", (await reverseName(beijing, 500)) === null);
+    fakeLocation(() => new Promise(() => undefined));
+    check("反查：等不到就当没有", (await reverseName(beijing, 30)) === null);
+    fakeLocation(async () => {
+      throw new Error("没网");
+    });
+    check("反查：出错照样往外抛，由 load.ts 兜底", await reverseName(beijing, 500).then(() => false, (error: Error) => error.message === "没网"));
+
+    fakeLocation(async () => null, async () => [{ locality: "北京市", subLocality: "海淀区", location: { latitude: 39.99, longitude: 116.31 } }]);
+    const found = await findPlace("海淀区");
+    check("找地点：名字是城市、区县一起带上", found !== null && found.name === "北京市" && found.district === "海淀区" && found.latitude === 39.99);
+    fakeLocation(async () => null, async () => null);
+    check("找地点：找不到是 null；空白不用问系统", (await findPlace("不存在")) === null && (await findPlace("   ")) === null);
+    if (original === undefined) delete globals.Location;
+    else globals.Location = original;
+  }
+
   // ---------------------------------------------------------------- 存储里读出来的东西
   section("存储：读出来的东西不信任");
   {
@@ -692,6 +943,17 @@ async function main(): Promise<void> {
     const noAnchor = parseCache({ ...clone(good), placeAnchor: null });
     check("有地名却没有「在哪反查的」：地名作废，缓存本身还能用", noAnchor !== null && noAnchor.place === null && noAnchor.placeAnchor === null);
     check("地名为空串当没有", parseCache({ ...clone(good), place: "" })?.place === null);
+    check("区县名：字符串、null（反查过没有）读得回来；没这一项（旧版本写的）、被改坏的当「没查过」", (() => {
+      const read = (district: unknown) => parseCache({ ...clone(good), district });
+      const old = parseCache(clone(good));
+      return read("海淀区")?.district === "海淀区" && read(" 海淀区 ")?.district === "海淀区" && read(null)?.district === null && old !== null && old.district === undefined && !("district" in old) && read(5)?.district === undefined && read("  ")?.district === undefined;
+    })());
+    check("没有「在哪反查的」时区县名跟着地名一起作废；带区县的缓存整体读得回来", (() => {
+      const voided = parseCache({ ...clone(good), placeAnchor: null, district: "海淀区" });
+      const { place, placeAnchor, ...rest } = good;
+      const withDistrict = clone({ ...rest, place, district: "海淀区", placeAnchor });
+      return voided !== null && voided.place === null && voided.district === undefined && JSON.stringify(parseCache(clone(withDistrict))) === JSON.stringify(withDistrict);
+    })());
     const rich = clone({ ...good, provider: "caiyun", extras: { apparent: 6, humidity: 28, wind: null, pressure: null, visibility: null, cloud: 40, dewpoint: -2, aqi: null, pollutants: { pm25: 35, pm10: null, o3: null, no2: null, so2: null, co: 0.8 }, uv: null, keypoint: "今日多云", dayOutlook: "未来24小时多云", rainOutlook: "未来2小时无降水", rainNote: null, life: null, days: [] }, alerts: { items: [], failure: null } });
     check("彩云的缓存带着详细数据和预警，读得回来", JSON.stringify(parseCache(clone(rich))) === JSON.stringify(rich));
     check("1.1.0 存下的详细数据（没有云量、露点、污染物、几句话，每天也没有风和湿度）读回来：新增的几项是 null，别的不变", (() => {
@@ -718,8 +980,8 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------- 设置与参数
   section("设置与小组件参数");
   {
-    check("默认跟着当前定位走", defaultSettings().mode === "current" && defaultSettings().fixed === null);
-    const fixed = { mode: "fixed", fixed: { name: "北京", latitude: 39.9, longitude: 116.4 } };
+    check("默认跟着当前定位走、地名写到城市", defaultSettings().mode === "current" && defaultSettings().fixed === null && defaultSettings().placeLevel === "city");
+    const fixed = { mode: "fixed", fixed: { name: "北京", latitude: 39.9, longitude: 116.4 }, placeLevel: "city" };
     check("固定城市读得回来", JSON.stringify(parseSettings(fixed)) === JSON.stringify(fixed));
     check("垃圾设置回到默认", [null, undefined, 3, "x", []].every((value) => JSON.stringify(parseSettings(value)) === JSON.stringify(defaultSettings())));
     check("说是固定、却没有可用的城市：按跟着定位走", parseSettings({ mode: "fixed" }).mode === "current" && parseSettings({ mode: "fixed", fixed: { name: "", latitude: 1, longitude: 1 } }).mode === "current" && parseSettings({ mode: "fixed", fixed: { name: "x", latitude: 100, longitude: 1 } }).mode === "current");
@@ -748,6 +1010,45 @@ async function main(): Promise<void> {
     check("找城市：结果能直接当固定城市存、再读回来", (() => {
       const place = pickPlace([{ locality: "北京市", location: { latitude: 39.9, longitude: 116.4 } }], "北京");
       return place !== null && parseSettings(clone({ mode: "fixed", fixed: place })).mode === "fixed";
+    })());
+
+    // ---- 地名写到哪一级
+    check("设置：地名写到哪一级，选了区县读得回来，别的值回到城市", parseSettings({ placeLevel: "district" }).placeLevel === "district" && parseSettings({ placeLevel: "city" }).placeLevel === "city" && ["town", "", null, 3, undefined].every((value) => parseSettings({ placeLevel: value }).placeLevel === "city"));
+    check("设置：写到区县的选择和带区县的固定城市整体读得回来", (() => {
+      const mine = { mode: "fixed", fixed: { name: "北京市", district: "海淀区", latitude: 39.9, longitude: 116.4 }, placeLevel: "district" };
+      return JSON.stringify(parseSettings(clone(mine))) === JSON.stringify(mine);
+    })());
+    check("固定城市的区县名：空白、不是字符串都丢掉，过长截到 24 个字，两头的空白去掉", (() => {
+      const withDistrict = (district: unknown) => parseSettings({ mode: "fixed", fixed: { name: "北京市", district, latitude: 1, longitude: 1 } }).fixed;
+      return withDistrict("  ")?.district === undefined && withDistrict(5)?.district === undefined && withDistrict(null)?.district === undefined && withDistrict("长".repeat(40))?.district?.length === 24 && withDistrict(" 海淀区 ")?.district === "海淀区";
+    })());
+    check("区县名：取系统给的 subLocality，空白 / 没有是 null，不拿道路名凑", districtName({ locality: "北京市", subLocality: "海淀区" }) === "海淀区" && districtName({ subLocality: " 海淀区 " }) === "海淀区" && districtName({ subLocality: "  " }) === null && districtName({ locality: "北京市" }) === null && districtName(undefined) === null && districtName(null) === null && districtName({ locality: "北京市", thoroughfare: "中关村大街" } as PlacemarkLike) === null);
+    check("反查结果拆成两级：城市和区县各挑各的", JSON.stringify(placeParts({ locality: "北京市", subLocality: "海淀区", administrativeArea: "北京市" })) === JSON.stringify({ city: "北京市", district: "海淀区" }) && JSON.stringify(placeParts({ administrativeArea: "浙江省" })) === JSON.stringify({ city: "浙江省", district: null }) && JSON.stringify(placeParts(undefined)) === JSON.stringify({ city: null, district: null }));
+    check("标题里写的名字：写到区县有区县就写区县，没有就退回城市；写到城市写城市（城市也没有才退到区县）", (() => {
+      const table: Array<[PlaceLevel, string | null, string | null | undefined, string | null]> = [
+        ["city", "北京市", "海淀区", "北京市"],
+        ["district", "北京市", "海淀区", "海淀区"],
+        ["district", "北京市", null, "北京市"],
+        ["district", "北京市", undefined, "北京市"],
+        ["district", null, "海淀区", "海淀区"],
+        ["city", null, "海淀区", "海淀区"],
+        ["city", null, null, null],
+        ["district", null, undefined, null],
+      ];
+      return table.every(([level, city, district, want]) => placeLabel(level, city, district) === want);
+    })());
+    check("找城市：结果里有区县名就一起带上；区县和城市同名、没有区县就不带；过长截到 24 个字", (() => {
+      const loc = { latitude: 39.9, longitude: 116.4 };
+      const withDistrict = pickPlace([{ locality: "北京市", subLocality: "海淀区", location: loc }], "海淀区");
+      const same = pickPlace([{ locality: "海淀区", subLocality: "海淀区", location: loc }], "x");
+      const none = pickPlace([{ locality: "北京市", location: loc }], "北京");
+      const tooLong = pickPlace([{ locality: "北京市", subLocality: "长".repeat(40), location: loc }], "x");
+      return withDistrict !== null && JSON.stringify(withDistrict) === JSON.stringify({ name: "北京市", district: "海淀区", latitude: 39.9, longitude: 116.4 }) && same !== null && !("district" in same) && none !== null && !("district" in none) && tooLong?.district?.length === 24;
+    })());
+    check("找城市：带区县的结果能直接存成固定城市、再读回来", (() => {
+      const found2 = pickPlace([{ locality: "北京市", subLocality: "海淀区", location: { latitude: 39.9, longitude: 116.4 } }], "海淀区");
+      const saved = parseSettings(clone({ mode: "fixed", fixed: found2, placeLevel: "district" }));
+      return saved.mode === "fixed" && saved.fixed?.district === "海淀区" && saved.placeLevel === "district";
     })());
   }
 

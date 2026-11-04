@@ -3,12 +3,13 @@
 // 预警和天气是同一次请求带回来的（彩云的 `alert=true`），来源在上面的「天气来源」里选；用备用的 Open-Meteo 就没有预警。
 // 说明文字一句一行。最要紧的两句放在最后：预警仅供参考；没看到预警不等于没有预警。
 
-import { Button, HStack, Section, Spacer, Text, VStack } from "scripting";
+import { Button, HStack, Spacer, Text, VStack } from "scripting";
 import { alertSymbol, type AlertItem } from "../core/alerts";
 import type { AlertState } from "../core/alertState";
 import type { Provider } from "../core/dataSource";
 import { alertStatusText, whenText } from "../core/present";
 import { AlertBadge } from "../widget/badge";
+import { Fold, type FoldState } from "./Fold";
 
 function metaLine(item: AlertItem, now: number): string {
   const parts: string[] = [];
@@ -53,6 +54,7 @@ export function AlertsSection({
   demoUntil,
   startDemo,
   stopDemo,
+  fold,
 }: {
   /** null 表示还没取过 */
   alertState: AlertState | null;
@@ -63,11 +65,12 @@ export function AlertsSection({
   demoUntil: number;
   startDemo: () => void;
   stopDemo: () => void;
+  fold: FoldState;
 }) {
   const items = alertState !== null && alertState.kind === "ok" ? alertState.items : [];
   const demoOn = demoUntil > now;
   return (
-    <Section header={<Text>天气预警</Text>} footer={<Text>{FOOTER}</Text>}>
+    <Fold title="天气预警" note={items.length > 0 ? items.length + " 条" : demoOn ? "预览中" : undefined} fold={fold} footer={FOOTER}>
       <HStack>
         <Text>状态</Text>
         <Spacer />
@@ -81,6 +84,6 @@ export function AlertsSection({
       <Button action={demoOn ? stopDemo : startDemo}>
         <Text foregroundStyle="systemBlue">{demoOn ? "结束预览" : "预览预警样式（10 分钟）"}</Text>
       </Button>
-    </Section>
+    </Fold>
   );
 }

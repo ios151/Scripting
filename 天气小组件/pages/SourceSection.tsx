@@ -4,11 +4,12 @@
 // 想换成自己的，选「自己的彩云接口」填地址和 token；想用备用的 Open-Meteo，选它——那边只有基础的天气。
 // 说明文字一句一行。
 
-import { Button, HStack, Picker, SecureField, Section, Spacer, Text, TextField } from "scripting";
+import { Button, HStack, Picker, SecureField, Spacer, Text, TextField } from "scripting";
 import { OFFICIAL_HOST } from "../core/caiyun";
 import type { DataSource, SourceMode } from "../core/dataSource";
 import type { Loaded } from "../core/load";
 import { sourceStatusText } from "../core/present";
+import { Fold, type FoldState } from "./Fold";
 
 const CUSTOM_HELP =
   "服务地址要以 https:// 开头\n" +
@@ -27,6 +28,9 @@ const FOOTER =
   "加上联网都会带的 IP 地址\n" +
   "不含账号、设备名称";
 
+/** 标题后面写现在用的是哪一种，收起时也看得见 */
+const SOURCE_NOTE: Readonly<Record<SourceMode, string>> = { builtin: "内置", custom: "自己的", openmeteo: "Open-Meteo" };
+
 export function SourceSection({
   source,
   choice,
@@ -40,6 +44,7 @@ export function SourceSection({
   setTokenText,
   saveCustom,
   clearCustom,
+  fold,
 }: {
   /** 存着的设置：现在生效的是哪一种，「自己的」填过什么 */
   source: DataSource;
@@ -56,12 +61,13 @@ export function SourceSection({
   setTokenText: (value: string) => void;
   saveCustom: () => void;
   clearCustom: () => void;
+  fold: FoldState;
 }) {
   const hasToken = source.token !== "";
   const canSave = hostText.trim() !== "" && (tokenText.trim() !== "" || hasToken) && !busy;
   const custom = choice === "custom";
   return (
-    <Section header={<Text>天气来源</Text>} footer={<Text>{(custom ? CUSTOM_HELP : "") + FOOTER}</Text>}>
+    <Fold title="天气来源" note={SOURCE_NOTE[source.mode]} fold={fold} footer={(custom ? CUSTOM_HELP : "") + FOOTER}>
       <Picker title="数据从哪里来" value={choice} onChanged={(value: string) => onChoice(value as SourceMode)}>
         <Text tag="builtin">内置（001 提供）</Text>
         <Text tag="custom">自己的彩云接口</Text>
@@ -103,6 +109,6 @@ export function SourceSection({
           <Text foregroundStyle="systemRed">清除自己的设置</Text>
         </Button>
       ) : null}
-    </Section>
+    </Fold>
   );
 }

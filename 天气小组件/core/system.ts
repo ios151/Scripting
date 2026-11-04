@@ -16,7 +16,7 @@ import { isValidCoord, type Coord } from "./geo";
 import type { Forecast } from "./forecast";
 import type { Fetched } from "./load";
 import { TIMEOUT_SECONDS, fetchForecast } from "./openmeteo";
-import { cityName, pickPlace } from "./place";
+import { pickPlace, placeParts, type PlaceParts } from "./place";
 import type { FixedPlace } from "./settings";
 import { readCache, readDataSource, readDemoUntil, readLocation, writeCache, writeLocation } from "./store";
 
@@ -70,12 +70,15 @@ export async function liveLocation(timeoutMs: number, fresh: boolean): Promise<C
   return info !== null && isValidCoord(info) ? { latitude: info.latitude, longitude: info.longitude } : null;
 }
 
-export async function reverseName(coord: Coord, timeoutMs: number): Promise<string | null> {
+/** 反查地名：城市和区县两级都带回来（写哪一级由 load.ts 按设置挑）。一个名字都没有返回 null */
+export async function reverseName(coord: Coord, timeoutMs: number): Promise<PlaceParts | null> {
   const placemarks = await withTimeout(
     () => Location.reverseGeocode({ latitude: coord.latitude, longitude: coord.longitude, locale: "zh-CN" }),
     timeoutMs,
   );
-  return placemarks === null ? null : cityName(placemarks[0]);
+  if (placemarks === null) return null;
+  const parts = placeParts(placemarks[0]);
+  return parts.city === null && parts.district === null ? null : parts;
 }
 
 /** 按城市名找地点（App 里选固定城市用）。找不到返回 null；联网出错会抛，由调用方提示 */

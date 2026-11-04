@@ -239,7 +239,7 @@ async function main(): Promise<void> {
       liveLocation: async () => BEIJING,
       provider: () => provider,
       fetchWeather: async () => ({ forecast: clone(FORECAST), extras: null, alerts }),
-      reverseName: async () => "北京市",
+      reverseName: async () => ({ city: "北京市", district: null }),
       demoUntil: () => demoUntil,
     });
     const input = { settings: defaultSettings(), parameter: null, force: false };

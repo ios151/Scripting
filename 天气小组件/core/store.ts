@@ -4,6 +4,7 @@
 import { parseCache, parseStoredLocation, type Cache, type StoredLocation } from "./cache";
 import { defaultSource, parseSource, type DataSource } from "./dataSource";
 import { defaultDisplay, parseDisplay, type Display } from "./display";
+import { parseFolds, type Folds } from "./folds";
 import { defaultSettings, parseSettings, type Settings } from "./settings";
 
 const CACHE_KEY = "weather.cache.v1";
@@ -12,6 +13,7 @@ const SETTINGS_KEY = "weather.settings.v1";
 const SOURCE_KEY = "weather.source.v1";
 const DEMO_KEY = "weather.alert-demo.v1";
 const DISPLAY_KEY = "weather.display.v1";
+const FOLDS_KEY = "weather.folds.v1";
 /** 只做过预警、还没有「数据来源」之前的版本留下的键，不再用了，清缓存时顺手删掉 */
 const LEGACY_KEYS = ["weather.alerts.v1", "weather.alert-source.v1"];
 
@@ -83,6 +85,22 @@ export function loadDisplay(): Display {
 
 export function saveDisplay(display: Display): void {
   Storage.set(DISPLAY_KEY, display);
+}
+
+/**
+ * App 页里哪几组是展开着的。和位置设置、显示样式一样是用户的选择：清空缓存时不动。
+ * 读出来先验一遍；没存过、读不出来都是全收着。
+ */
+export function loadFolds(): Folds {
+  try {
+    return parseFolds(Storage.get<unknown>(FOLDS_KEY));
+  } catch {
+    return {};
+  }
+}
+
+export function saveFolds(folds: Folds): void {
+  Storage.set(FOLDS_KEY, folds);
 }
 
 /** 「预览预警样式」开到什么时候；没开、读不出来都是 0 */

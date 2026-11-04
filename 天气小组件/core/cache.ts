@@ -27,9 +27,14 @@ export type Cache = {
   extras: Extras | null;
   /** 预警，只有彩云来源有 */
   alerts: AlertSnapshot | null;
-  /** 这个位置的地名，反查不到是 null，界面退回显示「当前位置」 */
+  /** 这个位置的地名（城市级），反查不到是 null，界面退回显示「当前位置」 */
   place: string | null;
-  /** 地名是在哪个位置反查的（挪出 5 公里才重查）；没有地名就是 null */
+  /**
+   * 反查时系统给的区县名：null 是反查过、系统没给；没有这一项是旧版本写的、或者地名不是反查来的（固定城市 / 小组件参数自带的）——
+   * 地名要写到区县时得补查一次
+   */
+  district?: string | null;
+  /** 地名是在哪个位置反查的（城市级挪出 5 公里才重查，写到区县时 2 公里）；没有地名就是 null */
   placeAnchor: Coord | null;
 };
 
@@ -57,6 +62,12 @@ function parseAlertSnapshot(raw: unknown): AlertSnapshot | null {
   return items === null && failure === null ? null : { items, failure };
 }
 
+/** 区县名：字符串是反查到的；null 是反查过、系统没给；别的（没这一项、被改坏）当「没查过」 */
+function parseDistrict(raw: unknown): string | null | undefined {
+  if (raw === null) return null;
+  return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : undefined;
+}
+
 export function parseCache(raw: unknown): Cache | null {
   if (typeof raw !== "object" || raw === null) return null;
   const record = raw as Record<string, unknown>;
@@ -73,7 +84,8 @@ export function parseCache(raw: unknown): Cache | null {
 
   const place = typeof record.place === "string" && record.place !== "" ? record.place : null;
   const placeAnchor = place === null ? null : pickCoord(record.placeAnchor);
-  // 有名字却没有「在哪反查的」，名字就说不准是哪儿的，不要
+  // 有名字却没有「在哪反查的」，名字就说不准是哪儿的，不要（区县名跟着一起作废）
+  const district = placeAnchor === null ? undefined : parseDistrict(record.district);
   return {
     version: 1,
     fetchedAt,
@@ -83,6 +95,7 @@ export function parseCache(raw: unknown): Cache | null {
     extras: parseExtras(record.extras),
     alerts: parseAlertSnapshot(record.alerts),
     place: placeAnchor === null ? null : place,
+    ...(district === undefined ? {} : { district }),
     placeAnchor,
   };
 }

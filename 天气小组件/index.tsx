@@ -29,15 +29,19 @@ import { cleanHost, cleanToken } from "./core/caiyun";
 import { ALERT_DEMO_MS } from "./core/config";
 import { defaultSource, providerOf, type DataSource, type SourceMode } from "./core/dataSource";
 import type { Display } from "./core/display";
+import { setFold, type FoldId, type Folds } from "./core/folds";
 import { loadEverything, type Everything } from "./core/everything";
 import type { Loaded, Source } from "./core/load";
+import { placeLabel } from "./core/place";
 import { present, sourceTestMessage, updatedText, type Content } from "./core/present";
-import type { Settings } from "./core/settings";
-import { clearData, clearDemo, loadDisplay, loadSettings, readDataSource, readDemoUntil, saveDisplay, saveSettings, writeDataSource, writeDemoUntil } from "./core/store";
+import type { PlaceLevel, Settings } from "./core/settings";
+import { clearData, clearDemo, loadDisplay, loadFolds, loadSettings, readDataSource, readDemoUntil, saveDisplay, saveFolds, saveSettings, writeDataSource, writeDemoUntil } from "./core/store";
 import { findPlace, systemDeps } from "./core/system";
 import { AlertsSection } from "./pages/AlertsSection";
-import { AirSection, DetailSection, LifeSection, SummarySection, WeekSection } from "./pages/DetailSections";
+import { AirSection, DetailSection, LifeSection, SummarySection, WeekSection, hasDetail } from "./pages/DetailSections";
 import { DisplaySection } from "./pages/DisplaySection";
+import { Fold, type FoldState } from "./pages/Fold";
+import { PlaceLevelPicker } from "./pages/PlaceLevelPicker";
 import { LoadingCard, PreviewCard } from "./pages/Preview";
 import { SourceSection } from "./pages/SourceSection";
 
@@ -77,6 +81,18 @@ function Row({ title, value }: { title: string; value: string }) {
   );
 }
 
+/** 「位置」里的说明（一句一行） */
+const PLACE_FOOTER =
+  "跟着当前定位：显示你所在位置的天气\n固定城市：不管你在哪，只看这个城市\n\n地名写到城市：北京市\n地名写到区县：海淀区\n系统没给出区县时，还是写城市\n\n拿不到定位时，会用上次的位置\n小组件底部会写「上次定位处的天气」";
+
+/** 「小组件」里的说明：怎么添加、怎么固定看另一个城市 */
+const WIDGET_HELP =
+  "长按主屏幕空白处\n点左上角的加号\n找到 Scripting 添加一个小组件\n长按它选「编辑小组件」\n脚本选「天气小组件」\n\n点一下小组件：打开这里\n\n想让某个小组件固定看另一个城市：\n在「参数」里填 纬度,经度,名称\n比如 39.90,116.40,北京";
+
+/** 「数据来源」里的署名和 Open-Meteo 的限制 */
+const CREDITS_FOOTER =
+  "天气和预警数据来自彩云天气，由 001 提供 API 接口\n彩云相关文档来自小麦（Telegram @GetSomeTriticum）\n\n备用来源 Open-Meteo：\nWeather data by Open-Meteo.com\n按 CC BY 4.0 提供，只用于个人非商用\n免费接口的限制：\n只能非商用，放了订阅或广告就不行\n每分钟 600 次，每小时 5000 次，每天 10000 次，每月 30 万次\n按 IP 和应用算，用得太凶会被封\n不保证一直能用，数据也不保证准\n小组件取天气最多每 15 分钟一次，几个小组件共用一份，远远用不到这些次数\n\n城市名由系统的地图服务反查，不经过上面任何一家";
+
 function App() {
   const dismiss = Navigation.useDismiss();
   const [settings, setSettings] = useState<Settings>(() => loadSettings());
@@ -88,6 +104,7 @@ function App() {
   const [hostText, setHostText] = useState(() => readDataSource().host);
   const [tokenText, setTokenText] = useState("");
   const [display, setDisplay] = useState<Display>(() => loadDisplay());
+  const [folds, setFolds] = useState<Folds>(() => loadFolds());
   const [demoUntil, setDemoUntil] = useState(() => readDemoUntil());
   const [now, setNow] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
@@ -137,6 +154,26 @@ function App() {
     void refresh(false, saved);
   }
 
+  /** 某一组的展开状态：点了展开 / 收起就存下来，下次打开还是那样 */
+  function foldOf(id: FoldId): FoldState {
+    return {
+      open: folds[id] === true,
+      onToggle: (open) => {
+        const next = setFold(folds, id, open);
+        setFolds(next);
+        saveFolds(next);
+      },
+    };
+  }
+
+  /** 换地名写到哪一级：存下来、马上重取一次（缓存还新就只改名字；缓存里没有区县那一项时补查一次地名） */
+  function changePlaceLevel(next: PlaceLevel): void {
+    const saved: Settings = { ...settings, placeLevel: next };
+    setSettings(saved);
+    saveSettings(saved);
+    void refresh(false, saved);
+  }
+
   async function search(): Promise<void> {
     const text = query.trim();
     if (text === "" || busy) return;
@@ -149,7 +186,8 @@ function App() {
         await Dialog.alert({ message: "没找到这个地方\n换个写法试试，比如加上省或市" });
         return;
       }
-      const saved: Settings = { mode: "fixed", fixed: place };
+      // 等地理编码的那几秒里用户可能改过别的设置（比如地名写到哪一级），存的时候读最新的，别拿点「查找」那一刻的旧值盖回去
+      const saved: Settings = { ...loadSettings(), mode: "fixed", fixed: place };
       setSettings(saved);
       setChoice("fixed");
       setQuery("");
@@ -262,6 +300,9 @@ function App() {
   const content: Content | null = loaded === null ? null : present(loaded, now, "compact", alerts ?? { kind: "off" }, display);
   const detail = content !== null && content.kind === "weather" ? content.detail : null;
   const cardWidth = Math.min(Math.max(Device.screen.width - 32, 280), 420);
+  const fixedLabel = settings.fixed === null ? "还没选" : (placeLabel(settings.placeLevel, settings.fixed.name, settings.fixed.district) ?? settings.fixed.name);
+  /** 「位置」收起时标题后面写现在是怎么看的 */
+  const placeNote = settings.mode === "fixed" ? "固定城市：" + fixedLabel : "跟着当前定位";
 
   return (
     <NavigationStack>
@@ -278,7 +319,7 @@ function App() {
           footer={
             loaded !== null && loaded.kind === "noLocation" ? (
               <Text>
-                {"没拿到位置\n到「设置 → 隐私与安全性 → 定位服务 → Scripting」里打开定位\n或者在下面选一个固定城市"}
+                {"没拿到位置\n到「设置 → 隐私与安全性 → 定位服务 → Scripting」里打开定位\n或者在下面「位置」里选一个固定城市"}
               </Text>
             ) : loaded !== null && loaded.kind === "noData" ? (
               <Text>{"天气暂时取不到\n检查一下网络，稍后再试\n原因在下面「天气来源」的状态里"}</Text>
@@ -293,97 +334,82 @@ function App() {
           </Button>
         </Section>
 
-        <DisplaySection display={display} onChange={changeDisplay} />
+        <Section header={<Text>小组件设置</Text>}>
+          <DisplaySection display={display} onChange={changeDisplay} fold={foldOf("display")} />
+          <Fold title="位置" note={placeNote} fold={foldOf("place")} footer={PLACE_FOOTER}>
+            <Picker title="看哪里的天气" value={choice} onChanged={(value: string) => changeChoice(value as Settings["mode"])}>
+              <Text tag="current">跟着当前定位</Text>
+              <Text tag="fixed">固定城市</Text>
+            </Picker>
+            <PlaceLevelPicker level={settings.placeLevel} onChange={changePlaceLevel} />
+            {choice === "fixed" ? <Row title="现在选的城市" value={fixedLabel} /> : null}
+            {choice === "fixed" ? <TextField title="城市" value={query} prompt="比如 北京、北京海淀区" onChanged={setQuery} /> : null}
+            {choice === "fixed" ? (
+              <Button action={() => void search()}>
+                <Text foregroundStyle={query.trim() === "" || busy ? "secondaryLabel" : "systemBlue"}>查找并使用</Text>
+              </Button>
+            ) : null}
+          </Fold>
+          <SourceSection
+            source={source}
+            choice={sourceChoice}
+            loaded={loaded}
+            now={now}
+            hostText={hostText}
+            tokenText={tokenText}
+            busy={busy}
+            onChoice={changeSourceChoice}
+            setHostText={setHostText}
+            setTokenText={setTokenText}
+            saveCustom={() => void saveCustom()}
+            clearCustom={() => void clearCustom()}
+            fold={foldOf("source")}
+          />
+          <AlertsSection
+            alertState={alerts}
+            provider={providerOf(source)}
+            now={now}
+            demoUntil={demoUntil}
+            startDemo={() => void startDemo()}
+            stopDemo={() => void stopDemo()}
+            fold={foldOf("alerts")}
+          />
+        </Section>
 
-        <SummarySection detail={detail} />
-        <WeekSection detail={detail} />
-        <DetailSection detail={detail} />
-        <AirSection detail={detail} />
-        <LifeSection detail={detail} />
+        {hasDetail(detail) ? (
+          <Section header={<Text>天气详情</Text>}>
+            <SummarySection detail={detail} fold={foldOf("summary")} />
+            <WeekSection detail={detail} fold={foldOf("week")} />
+            <DetailSection detail={detail} fold={foldOf("detail")} />
+            <AirSection detail={detail} fold={foldOf("air")} />
+            <LifeSection detail={detail} fold={foldOf("life")} />
+          </Section>
+        ) : null}
 
-        <Section
-          header={<Text>位置</Text>}
-          footer={
-            <Text>
-              {"跟着当前定位：显示你所在位置的天气\n固定城市：不管你在哪，只看这个城市\n\n拿不到定位时，会用上次的位置\n小组件底部会写「上次定位处的天气」"}
-            </Text>
-          }
-        >
-          <Picker title="看哪里的天气" value={choice} onChanged={(value: string) => changeChoice(value as Settings["mode"])}>
-            <Text tag="current">跟着当前定位</Text>
-            <Text tag="fixed">固定城市</Text>
-          </Picker>
-          {choice === "fixed" ? <Row title="现在选的城市" value={settings.fixed === null ? "还没选" : settings.fixed.name} /> : null}
-          {choice === "fixed" ? <TextField title="城市" value={query} prompt="比如 北京" onChanged={setQuery} /> : null}
-          {choice === "fixed" ? (
-            <Button action={() => void search()}>
-              <Text foregroundStyle={query.trim() === "" || busy ? "secondaryLabel" : "systemBlue"}>查找并使用</Text>
+        <Section header={<Text>其他</Text>}>
+          <Fold title="现在的情况" fold={foldOf("status")}>
+            <Row title="地点" value={placeLine(loaded)} />
+            <Row title="位置来源" value={loaded !== null && loaded.kind !== "noLocation" ? SOURCE_TEXT[loaded.source] : "—"} />
+            <Row title="天气更新时间" value={loaded !== null && loaded.kind === "ok" ? updatedText(loaded.fetchedAt, now) : "—"} />
+          </Fold>
+          <Fold title="小组件" fold={foldOf("widget")} footer={WIDGET_HELP}>
+            <Menu label={<Text foregroundStyle="systemBlue">预览小组件</Text>}>
+              {PREVIEWS.map((item) => (
+                <Button key={item.family} title={item.title} action={() => void preview(item.family)} />
+              ))}
+            </Menu>
+          </Fold>
+          <Fold title="数据来源" fold={foldOf("credits")} footer={CREDITS_FOOTER}>
+            <Button action={() => void Safari.openURL("https://www.caiyunapp.com/")}>
+              <Text foregroundStyle="systemBlue">天气和预警 彩云天气</Text>
             </Button>
-          ) : null}
-        </Section>
-
-        <SourceSection
-          source={source}
-          choice={sourceChoice}
-          loaded={loaded}
-          now={now}
-          hostText={hostText}
-          tokenText={tokenText}
-          busy={busy}
-          onChoice={changeSourceChoice}
-          setHostText={setHostText}
-          setTokenText={setTokenText}
-          saveCustom={() => void saveCustom()}
-          clearCustom={() => void clearCustom()}
-        />
-
-        <AlertsSection
-          alertState={alerts}
-          provider={providerOf(source)}
-          now={now}
-          demoUntil={demoUntil}
-          startDemo={() => void startDemo()}
-          stopDemo={() => void stopDemo()}
-        />
-
-        <Section header={<Text>现在的情况</Text>}>
-          <Row title="地点" value={placeLine(loaded)} />
-          <Row title="位置来源" value={loaded !== null && loaded.kind !== "noLocation" ? SOURCE_TEXT[loaded.source] : "—"} />
-          <Row title="天气更新时间" value={loaded !== null && loaded.kind === "ok" ? updatedText(loaded.fetchedAt, now) : "—"} />
-        </Section>
-
-        <Section
-          header={<Text>小组件</Text>}
-          footer={
-            <Text>
-              {"长按主屏幕空白处\n点左上角的加号\n找到 Scripting 添加一个小组件\n长按它选「编辑小组件」\n脚本选「天气小组件」\n\n点一下小组件：打开这里\n\n想让某个小组件固定看另一个城市：\n在「参数」里填 纬度,经度,名称\n比如 39.90,116.40,北京"}
-            </Text>
-          }
-        >
-          <Menu label={<Text foregroundStyle="systemBlue">预览小组件</Text>}>
-            {PREVIEWS.map((item) => (
-              <Button key={item.family} title={item.title} action={() => void preview(item.family)} />
-            ))}
-          </Menu>
-        </Section>
-
-        <Section
-          header={<Text>数据来源</Text>}
-          footer={
-            <Text>
-              {"天气和预警数据来自彩云天气，由 001 提供 API 接口\n彩云相关文档来自小麦（Telegram @GetSomeTriticum）\n\n备用来源 Open-Meteo：\nWeather data by Open-Meteo.com\n按 CC BY 4.0 提供，只用于个人非商用\n免费接口的限制：\n只能非商用，放了订阅或广告就不行\n每分钟 600 次，每小时 5000 次，每天 10000 次，每月 30 万次\n按 IP 和应用算，用得太凶会被封\n不保证一直能用，数据也不保证准\n小组件取天气最多每 15 分钟一次，几个小组件共用一份，远远用不到这些次数\n\n城市名由系统的地图服务反查，不经过上面任何一家"}
-            </Text>
-          }
-        >
-          <Button action={() => void Safari.openURL("https://www.caiyunapp.com/")}>
-            <Text foregroundStyle="systemBlue">天气和预警 彩云天气</Text>
-          </Button>
-          <Button action={() => void Safari.openURL("https://open-meteo.com/")}>
-            <Text foregroundStyle="systemBlue">备用来源 Open-Meteo.com</Text>
-          </Button>
-          <Button action={() => void Safari.openURL("https://creativecommons.org/licenses/by/4.0/")}>
-            <Text foregroundStyle="systemBlue">数据许可 CC BY 4.0</Text>
-          </Button>
+            <Button action={() => void Safari.openURL("https://open-meteo.com/")}>
+              <Text foregroundStyle="systemBlue">备用来源 Open-Meteo.com</Text>
+            </Button>
+            <Button action={() => void Safari.openURL("https://creativecommons.org/licenses/by/4.0/")}>
+              <Text foregroundStyle="systemBlue">数据许可 CC BY 4.0</Text>
+            </Button>
+          </Fold>
         </Section>
 
         <Section>

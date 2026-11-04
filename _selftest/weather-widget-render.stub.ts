@@ -9,7 +9,7 @@ import Module from "node:module";
 /** 这个脚本里用到的视图。名字就是它的 type */
 const VIEWS = [
   "AccessoryWidgetBackground", "HStack", "Image", "Label", "Spacer", "Text", "VStack", "ZStack",
-  "Section", "Button", "Picker", "SecureField", "TextField", "Capsule", "Circle", "Rectangle", "RoundedRectangle",
+  "Section", "Button", "Picker", "SecureField", "TextField", "Capsule", "Circle", "Rectangle", "RoundedRectangle", "DisclosureGroup",
 ] as const;
 
 const fake: Record<string, string> = {};

@@ -28,10 +28,11 @@ import type { Loaded } from "../天气小组件/core/load";
 import { DEMO_ALERTS } from "../天气小组件/core/alerts";
 import { LARGE_DAYS, MEDIUM_DAYS, detailOf, effectiveDisplay, present, sourceStatusText, updatedText, visibilityText, weekdayOf, windText, type Content } from "../天气小组件/core/present";
 import { defaultDisplay, parseDisplay, sameDisplay, type Display } from "../天气小组件/core/display";
+import { FOLD_IDS, parseFolds, setFold, type Folds } from "../天气小组件/core/folds";
 import { NOTABLE_CHANGE, changeText, headlineText, nextSunEvent, temperatureChange } from "../天气小组件/core/headline";
 import { layoutVariant } from "../天气小组件/core/layout";
 import { buildSnapshot } from "../天气小组件/core/snapshot";
-import { clearData, clearDemo, loadDisplay, readCache, readDataSource, readDemoUntil, readLocation, writeCache, writeDataSource, saveDisplay, writeDemoUntil, writeLocation } from "../天气小组件/core/store";
+import { clearData, clearDemo, loadDisplay, loadFolds, readCache, readDataSource, readDemoUntil, readLocation, writeCache, writeDataSource, saveDisplay, saveFolds, writeDemoUntil, writeLocation } from "../天气小组件/core/store";
 import { isDaylight, localDate, sunTimes } from "../天气小组件/core/sun";
 
 let passed = 0;
@@ -582,6 +583,16 @@ async function main(): Promise<void> {
       const broken = sameDisplay(loadDisplay(), defaultDisplay());
       return fresh && saved && kept && broken;
     })());
+    check("展开状态：没存过全收着；存了再读一字不差；清空缓存不动它；读坏了全收着", (() => {
+      const mine: Folds = { display: true, source: true };
+      const fresh = Object.keys(loadFolds()).length === 0;
+      saveFolds(mine);
+      const saved = JSON.stringify(loadFolds()) === JSON.stringify(mine);
+      clearData();
+      const kept = JSON.stringify(loadFolds()) === JSON.stringify(mine);
+      memory.set("weather.folds.v1", "乱写的");
+      return fresh && saved && kept && Object.keys(loadFolds()).length === 0;
+    })());
     check("预览预警样式的截止时间：存得进、读得回、清得掉；读坏了是 0", (() => {
       writeDemoUntil(NOW + 5);
       const stored = readDemoUntil();
@@ -598,7 +609,7 @@ async function main(): Promise<void> {
     memory.set("weather.cache.v1", "乱写的");
     check("缓存读坏了：当没有", readCache() === null);
     broken = true;
-    check("存储读不出来（抛错）：当默认（内置）、缓存当没有、位置当没有、预览当没开、显示样式回默认，不崩", readDataSource().mode === "builtin" && readCache() === null && readLocation() === null && readDemoUntil() === 0 && sameDisplay(loadDisplay(), defaultDisplay()));
+    check("存储读不出来（抛错）：当默认（内置）、缓存当没有、位置当没有、预览当没开、显示样式回默认、展开状态全收着，不崩", readDataSource().mode === "builtin" && readCache() === null && readLocation() === null && readDemoUntil() === 0 && sameDisplay(loadDisplay(), defaultDisplay()) && Object.keys(loadFolds()).length === 0);
     broken = false;
     if (previous !== undefined) Object.defineProperty(globalThis, "Storage", previous);
     else delete (globalThis as unknown as { Storage?: unknown }).Storage;
@@ -802,6 +813,21 @@ async function main(): Promise<void> {
     })());
   }
 
+  // ---------------------------------------------------------------- 展开 / 收起的记忆
+  section("App 页的展开 / 收起：存下来的怎么读、怎么改");
+  {
+    check("没存过 / 垃圾：全收着", [null, undefined, 3, "x", [], true].every((value) => Object.keys(parseFolds(value)).length === 0));
+    check("只认认得的组、只认 true：别的名字、false、字符串、数字都丢掉", JSON.stringify(parseFolds({ display: true, place: false, source: "true", alerts: 1, 不认识: true, week: true })) === JSON.stringify({ display: true, week: true }));
+    check("每一组都读得回来", JSON.stringify(parseFolds(Object.fromEntries(FOLD_IDS.map((id) => [id, true])))) === JSON.stringify(Object.fromEntries(FOLD_IDS.map((id) => [id, true]))));
+    check("组的 id 不重复，一共 12 组", new Set(FOLD_IDS).size === FOLD_IDS.length && FOLD_IDS.length === 12);
+    check("展开一组：加上、不改传进来的；收起：去掉；重复展开不出错；收起没展开过的也不出错", (() => {
+      const start: Folds = { place: true };
+      const opened = setFold(start, "display", true);
+      const closed = setFold(opened, "place", false);
+      return JSON.stringify(start) === JSON.stringify({ place: true }) && JSON.stringify(opened) === JSON.stringify({ place: true, display: true }) && JSON.stringify(closed) === JSON.stringify({ display: true }) && JSON.stringify(setFold(opened, "display", true)) === JSON.stringify(opened) && Object.keys(setFold({}, "week", false)).length === 0;
+    })());
+  }
+
   // ---------------------------------------------------------------- 源码扫描
   section("源码扫描");
   {
@@ -817,8 +843,11 @@ async function main(): Promise<void> {
     check("存储的键都不一样（显示样式的键不能和别的撞）", keys.length >= 6 && new Set(keys).size === keys.length && keys.includes("weather.display.v1"));
     const widgetEntry = read(join(SCRIPT_DIR, "widget.tsx"));
     const indexCode = read(join(SCRIPT_DIR, "index.tsx"));
-    check("显示样式接线：小组件读存下来的样式交给 present；脚本页的卡片预览用同一份；换样式时存下来、让小组件重画", /present\(loaded, now, size, alerts, loadDisplay\(\)\)/.test(widgetEntry) && /present\(loaded, now, "compact", alerts \?\? \{ kind: "off" \}, display\)/.test(indexCode) && /<DisplaySection display=\{display\} onChange=\{changeDisplay\} \/>/.test(indexCode) && /function changeDisplay\(next: Display\): void \{[\s\S]{0,200}saveDisplay\(next\);[\s\S]{0,80}Widget\.reloadAll\(\);/.test(indexCode));
+    check("显示样式接线：小组件读存下来的样式交给 present；脚本页的卡片预览用同一份；换样式时存下来、让小组件重画", /present\(loaded, now, size, alerts, loadDisplay\(\)\)/.test(widgetEntry) && /present\(loaded, now, "compact", alerts \?\? \{ kind: "off" \}, display\)/.test(indexCode) && /<DisplaySection display=\{display\} onChange=\{changeDisplay\} fold=\{foldOf\("display"\)\} \/>/.test(indexCode) && /function changeDisplay\(next: Display\): void \{[\s\S]{0,200}saveDisplay\(next\);[\s\S]{0,80}Widget\.reloadAll\(\);/.test(indexCode));
+    check("脚本页分类和展开 / 收起的接线：三类标题（小组件设置 / 天气详情 / 其他）；每一组的 id 都在 foldOf(...) 里用到一次、不重复；点了展开 / 收起就存下来；页面组件自己不再套 Section", FOLD_IDS.every((id) => indexCode.split(`foldOf("${id}")`).length === 2) && (indexCode.match(/foldOf\("/g) ?? []).length === FOLD_IDS.length && /<Section header=\{<Text>小组件设置<\/Text>\}>/.test(indexCode) && /<Section header=\{<Text>天气详情<\/Text>\}>/.test(indexCode) && /<Section header=\{<Text>其他<\/Text>\}>/.test(indexCode) && /function foldOf\(id: FoldId\): FoldState \{[\s\S]{0,260}setFold\(folds, id, open\);[\s\S]{0,80}saveFolds\(next\);/.test(indexCode) && /hasDetail\(detail\) \? \(/.test(indexCode) && /open: folds\[id\] === true/.test(indexCode) && /<Fold title="位置" note=\{placeNote\} fold=\{foldOf\("place"\)\}/.test(indexCode) && /const placeNote = settings\.mode === "fixed" \? "固定城市：" \+ fixedLabel : "跟着当前定位";/.test(indexCode) && /useState<Folds>\(\(\) => loadFolds\(\)\)/.test(indexCode) && ["DisplaySection", "SourceSection", "AlertsSection", "DetailSections"].every((name) => !/<Section\b/.test(codeOf(join(SCRIPT_DIR, "pages", name + ".tsx")))));
+    check("展开状态不碰网络、不碰存储（只有 store.ts 碰）：folds.ts 里没有 Storage / fetch", !/\b(Storage|fetch)\b/.test(codeOf(join(SCRIPT_DIR, "core", "folds.ts"))));
     check("显示样式不碰网络、不碰存储（只有 store.ts 碰）：display.ts、headline.ts 里没有 Storage / fetch", !/\b(Storage|fetch)\b/.test(codeOf(join(SCRIPT_DIR, "core", "display.ts"))) && !/\b(Storage|fetch)\b/.test(codeOf(join(SCRIPT_DIR, "core", "headline.ts"))));
+    check("地名写到哪一级接线：脚本页「位置」里有选择器，换了就存下来并重取；选好固定城市时不丢这一项；place.ts / settings.ts / refresh.ts 不碰系统", /<PlaceLevelPicker level=\{settings\.placeLevel\} onChange=\{changePlaceLevel\} \/>/.test(indexCode) && /function changePlaceLevel\(next: PlaceLevel\): void \{[\s\S]{0,200}saveSettings\(saved\);[\s\S]{0,80}void refresh\(false, saved\);/.test(indexCode) && /const saved: Settings = \{ \.\.\.loadSettings\(\), mode: "fixed", fixed: place \};/.test(indexCode) && ["place.ts", "settings.ts", "refresh.ts"].every((name) => !/\b(Storage|Location|Widget|Script|fetch)\b[.(]/.test(codeOf(join(SCRIPT_DIR, "core", name)))));
   }
 
   (globalThis as unknown as { fetch: unknown }).fetch = realFetch;

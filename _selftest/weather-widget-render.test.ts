@@ -19,14 +19,17 @@ import { adaptCaiyun } from "../天气小组件/core/caiyunWeather";
 import { defaultSource } from "../天气小组件/core/dataSource";
 import { defaultDisplay, sameDisplay, type Display } from "../天气小组件/core/display";
 import { FetchError, describeFailure } from "../天气小组件/core/failure";
+import type { PlaceLevel } from "../天气小组件/core/settings";
 import type { Coord } from "../天气小组件/core/geo";
 import { ALERT_BADGE_RATIO, ALERT_GLYPH_RATIO, layoutVariant, metricsFor } from "../天气小组件/core/layout";
 import type { Loaded } from "../天气小组件/core/load";
 import { ALERT_BADGE, AQI_COLOR, BAR_FILL, BAR_TRACK, TEXT_PRIMARY } from "../天气小组件/core/palette";
 import { LARGE_DAYS, NO_DATA, NO_LOCATION, present, type Card, type Content } from "../天气小组件/core/present";
 import { AlertsSection } from "../天气小组件/pages/AlertsSection";
-import { AirSection, DetailSection, LifeSection, SummarySection, WeekSection } from "../天气小组件/pages/DetailSections";
+import { AirSection, DetailSection, LifeSection, SummarySection, WeekSection, hasDetail } from "../天气小组件/pages/DetailSections";
 import { DisplaySection } from "../天气小组件/pages/DisplaySection";
+import { Fold, type FoldChildren, type FoldState } from "../天气小组件/pages/Fold";
+import { PlaceLevelPicker } from "../天气小组件/pages/PlaceLevelPicker";
 import { LoadingCard, PreviewCard } from "../天气小组件/pages/Preview";
 import { SourceSection } from "../天气小组件/pages/SourceSection";
 import { bottomKind } from "../天气小组件/widget/bodies";
@@ -130,6 +133,25 @@ function inOrder(haystack: string[], needles: string[]): boolean {
 
 type Frame = { width?: number; height?: number };
 const frameOf = (node: Node): Frame => (typeof node.props.frame === "object" && node.props.frame !== null ? (node.props.frame as Frame) : {});
+
+/** 一组的展开状态（App 页里是存下来的，这里直接给） */
+const foldOf = (open: boolean, onToggle: (open: boolean) => void = () => undefined): FoldState => ({ open, onToggle });
+/** 一组的标题：label 是一个 Text，或者「标题 + 摘要」两段字的 HStack */
+const titleOf = (root: Node): string => {
+  const label = root.props.label;
+  if (!isNode(label)) return "";
+  return label.type === "HStack" ? textOf(label.children[0]) : textOf(label);
+};
+/** 标题后面的摘要，没有就是 null */
+const noteOf = (root: Node): string | null => {
+  const label = root.props.label;
+  return isNode(label) && label.type === "HStack" ? textOf(label.children[1]) : null;
+};
+/** 展开后最后那行说明文字（小一号的灰字），没有就是空串 */
+const footnoteOf = (root: Node): string => {
+  const last = root.children[root.children.length - 1];
+  return last !== undefined && typeof last !== "string" && last.type === "Text" && last.props.font === "footnote" ? textOf(last) : "";
+};
 
 // ---------------------------------------------------------------- 数据：真实样例（北京，晚上九点多）
 
@@ -651,7 +673,7 @@ function main(): void {
   // ---------------------------------------------------------------- 设置页里的「显示样式」
   section("App 页：显示样式一节");
   {
-    const make = (display: Display, onChange: (next: Display) => void = () => undefined) => render(DisplaySection({ display, onChange }));
+    const make = (display: Display, onChange: (next: Display) => void = () => undefined, open = true) => render(DisplaySection({ display, onChange, fold: foldOf(open) }));
     const pickers = (root: Node) => find(root, (node) => node.type === "Picker");
     const def = defaultDisplay();
     check("默认样式：三个选择器（中间一排、右上一行、底部一行），没有「恢复默认样式」", pickers(make(def)).length === 3 && !texts(make(def)).includes("恢复默认样式"));
@@ -685,11 +707,70 @@ function main(): void {
       (reset.props.action as () => void)();
       return texts(root).includes("恢复默认样式") && seen.length === 1 && sameDisplay(seen[0], def);
     })());
-    check("说明文字：一句一行，写了默认的样子和备用来源的情况", (() => {
-      const footer = make(def).props.footer;
-      const text = isNode(footer) ? textOf(footer) : "";
+    check("标题「显示样式」，后面跟一句摘要：默认的样式写「默认」，改过的写「已自定义」", titleOf(make(def)) === "显示样式" && noteOf(make(def)) === "默认" && noteOf(make({ ...def, strip: "daily" })) === "已自定义");
+    check("收起时：只有标题，里面的选择器和说明文字都不画", (() => {
+      const root = make(def, () => undefined, false);
+      return root.type === "DisclosureGroup" && root.props.isExpanded === false && root.children.length === 0;
+    })());
+    check("说明文字（展开后的最后一行）：一句一行，写了默认的样子和备用来源的情况", (() => {
+      const text = footnoteOf(make(def));
       return text.split("\n").length >= 4 && text.includes("默认：逐小时、天气和降水概率、体感湿度风空气") && text.includes("备用来源（Open-Meteo）没有这些数据，会按默认的样子画");
     })());
+  }
+
+  // ---------------------------------------------------------------- 设置页里的「地名写到」
+  section("App 页：位置里的「地名写到」");
+  {
+    const pick = (level: PlaceLevel, onChange: (next: PlaceLevel) => void = () => undefined) => render(PlaceLevelPicker({ level, onChange }));
+    check("选择器：标题「地名写到」，两个选项「城市」「区县」，tag 就是存下来的值", (() => {
+      const root = pick("city");
+      const tags = find(root, (node) => node.type === "Text" && typeof node.props.tag === "string").map((node) => [node.props.tag, textOf(node)]);
+      return root.type === "Picker" && root.props.title === "地名写到" && JSON.stringify(tags) === JSON.stringify([["city", "城市"], ["district", "区县"]]);
+    })());
+    check("选择器停在现在的值上", pick("city").props.value === "city" && pick("district").props.value === "district");
+    check("换一个选项：把选的值交出去", (() => {
+      const seen: PlaceLevel[] = [];
+      const root = pick("city", (next) => seen.push(next));
+      (root.props.onChanged as (value: string) => void)("district");
+      (root.props.onChanged as (value: string) => void)("city");
+      return seen.join() === "district,city";
+    })());
+  }
+
+  // ---------------------------------------------------------------- 可展开 / 收起的组
+  section("App 页：可展开 / 收起的组（Fold）");
+  {
+    type Options = { note?: string; open?: boolean; footer?: string; onToggle?: (open: boolean) => void; content?: string };
+    const make = (options: Options = {}) =>
+      render(Fold({ title: "位置", note: options.note, fold: foldOf(options.open ?? true, options.onToggle), footer: options.footer, children: (options.content ?? "里面的一行") as unknown as FoldChildren }));
+    const open = make({ footer: "说明一\n说明二" });
+    check("展开：标题是 DisclosureGroup 的 label，里面的内容在前、说明文字（小一号灰字）在最后", open.type === "DisclosureGroup" && open.props.isExpanded === true && titleOf(open) === "位置" && open.children.map(textOf).join("|") === "里面的一行|说明一\n说明二" && footnoteOf(open) === "说明一\n说明二");
+    const closed = make({ open: false, footer: "说明" });
+    check("收起：只有标题，里面的内容和说明文字都不交出去（不让系统白建）", closed.props.isExpanded === false && closed.children.length === 0 && titleOf(closed) === "位置");
+    check("展开、收起的回调就是传进来的那个，参数是新的状态", (() => {
+      const seen: boolean[] = [];
+      const root = make({ onToggle: (next) => seen.push(next) });
+      (root.props.onChanged as (value: boolean) => void)(false);
+      (root.props.onChanged as (value: boolean) => void)(true);
+      return seen.join() === "false,true";
+    })());
+    check("没有说明文字就不画最后那一行", footnoteOf(make()) === "" && make().children.length === 1);
+    check("标题后面可以跟一句摘要：一个 HStack 里两段字，摘要小一号灰字、只占一行", (() => {
+      const label = make({ note: "跟着当前定位" }).props.label;
+      if (!isNode(label) || label.type !== "HStack" || label.children.length !== 2) return false;
+      const summary = label.children[1];
+      return typeof summary !== "string" && summary.type === "Text" && textOf(summary) === "跟着当前定位" && summary.props.font === 13 && summary.props.lineLimit === 1;
+    })());
+    check("摘要紧跟在标题后面：标题那一行里没有 Spacer、没有撑满宽度的 frame（真机试过，那样写展开会失灵）", (() => {
+      const label = make({ note: "跟着当前定位" }).props.label;
+      if (!isNode(label)) return false;
+      const everyNode = find(label, () => true);
+      return everyNode.every((node) => node.type !== "Spacer" && frameOf(node).width === undefined && (node.props.frame as { maxWidth?: unknown } | undefined)?.maxWidth === undefined);
+    })());
+    check("没有摘要（没写、写了空串）：标题就是一个 Text", [undefined, ""].every((note) => {
+      const label = make({ note }).props.label;
+      return isNode(label) && label.type === "Text" && textOf(label) === "位置";
+    }));
   }
 
   // ---------------------------------------------------------------- 预览卡片
@@ -705,40 +786,52 @@ function main(): void {
   section("App 页：概况、未来几天、详细数据、空气质量、生活指数");
   {
     const detail = c.compact.detail;
-    check("备用来源（没有详细数据）：这几节都不出现", [SummarySection, WeekSection, DetailSection, AirSection, LifeSection].every((part) => expand(part({ detail: null })).length === 0));
+    check("备用来源（没有详细数据）：这几节都不出现", [SummarySection, WeekSection, DetailSection, AirSection, LifeSection].every((part) => expand(part({ detail: null, fold: foldOf(true) })).length === 0) && !hasDetail(null));
     if (detail === null) throw new Error("应该有详细数据");
 
-    const summary = render(SummarySection({ detail }));
-    check("概况：三句话（节标题「概况」之外）", summary.type === "Section" && summary.children.map(textOf).join("|") === "今日多云，气温适宜|未来24小时多云，气温适中|未来2小时无降水" && textOf(summary.props.header as Node) === "概况");
-    check("概况：读不到的那句不写；全都没有就整节不出现", render(SummarySection({ detail: { ...detail, dayOutlook: null } })).children.length === 2 && expand(SummarySection({ detail: { ...detail, keypoint: null, dayOutlook: null, rainOutlook: null } })).length === 0);
+    const summary = render(SummarySection({ detail, fold: foldOf(true) }));
+    check("概况：三句话（标题「概况」之外）", summary.type === "DisclosureGroup" && summary.children.map(textOf).join("|") === "今日多云，气温适宜|未来24小时多云，气温适中|未来2小时无降水" && titleOf(summary) === "概况");
+    check("概况：读不到的那句不写；全都没有就整节不出现", render(SummarySection({ detail: { ...detail, dayOutlook: null }, fold: foldOf(true) })).children.length === 2 && expand(SummarySection({ detail: { ...detail, keypoint: null, dayOutlook: null, rainOutlook: null }, fold: foldOf(true) })).length === 0);
 
-    const week = render(WeekSection({ detail }));
+    const week = render(WeekSection({ detail, fold: foldOf(true) }));
     check("未来几天：今天起 6 天，每天写天气气温，第二行小字写风 / 湿度 / 空气 / 紫外线", find(week, (node) => node.type === "VStack").length === 6 && texts(week).filter((text) => text.includes("湿度") && text.includes("紫外线")).length === 6 && inOrder(texts(week), ["今天", "明天", "后天", "周四", "周五", "周六"]));
     check("未来几天：某一天没有第二行的数据就只有一行", (() => {
       const lines = detail.week.map((day, index) => (index === 2 ? { ...day, extra: null } : day));
-      const node = render(WeekSection({ detail: { ...detail, week: lines } }));
+      const node = render(WeekSection({ detail: { ...detail, week: lines }, fold: foldOf(true) }));
       return texts(node).filter((text) => text.includes("紫外线")).length === 5;
     })());
 
-    const stats = render(DetailSection({ detail }));
+    const stats = render(DetailSection({ detail, fold: foldOf(true) }));
     check("详细数据：8 行，标签和值各一个", find(stats, (node) => node.type === "HStack").length === 8 && inOrder(texts(stats), detail.all.flatMap((stat) => [stat.label, stat.value])));
-    const air = render(AirSection({ detail }));
+    const air = render(AirSection({ detail, fold: foldOf(true) }));
     check("空气质量：7 行（指数加六项污染物）", find(air, (node) => node.type === "HStack").length === 7 && texts(air).includes("PM2.5") && texts(air).includes("35 μg/m³") && texts(air).includes("1 mg/m³"));
-    const life = render(LifeSection({ detail }));
+    const life = render(LifeSection({ detail, fold: foldOf(true) }));
     check("生活指数：4 行", find(life, (node) => node.type === "HStack").length === 4 && texts(life).includes("薄外套"));
+    check("这五节的标题：概况、未来几天、详细数据、空气质量、生活指数；展开 / 收起的回调都是传进来的那个", (() => {
+      const seen: boolean[] = [];
+      const fold = foldOf(true, (open) => seen.push(open));
+      const roots = [SummarySection, WeekSection, DetailSection, AirSection, LifeSection].map((part) => render(part({ detail, fold })));
+      roots.forEach((root) => (root.props.onChanged as (value: boolean) => void)(false));
+      return roots.map(titleOf).join() === "概况,未来几天,详细数据,空气质量,生活指数" && seen.length === 5 && seen.every((open) => !open);
+    })());
+    check("收起时每一节都只有标题", [SummarySection, WeekSection, DetailSection, AirSection, LifeSection].every((part) => render(part({ detail, fold: foldOf(false) })).children.length === 0));
+    check("这五节有没有哪一节有内容：有彩云的详细数据就有；一样都没有（或备用来源）就没有，那一类连标题都不用画", (() => {
+      const empty = { ...detail, keypoint: null, dayOutlook: null, rainOutlook: null, week: [], all: [], air: [], life: [] };
+      return hasDetail(detail) && !hasDetail(empty) && hasDetail({ ...empty, life: detail.life }) && hasDetail({ ...empty, keypoint: "今日多云" }) && hasDetail({ ...empty, week: detail.week });
+    })());
   }
 
   // ---------------------------------------------------------------- 预警一节
   section("App 页：天气预警一节");
   {
-    const alertsOf = (state: AlertState | null, provider: "caiyun" | "openmeteo", demoUntil = 0) => render(AlertsSection({ alertState: state, provider, now: NOW, demoUntil, startDemo: () => undefined, stopDemo: () => undefined }));
+    const alertsOf = (state: AlertState | null, provider: "caiyun" | "openmeteo", demoUntil = 0) => render(AlertsSection({ alertState: state, provider, now: NOW, demoUntil, startDemo: () => undefined, stopDemo: () => undefined, fold: foldOf(true) }));
     const ok = alertsOf({ kind: "ok", items: DEMO_ALERTS.slice(), fetchedAt: NOW, failure: null }, "caiyun");
     check("有预警：状态行写几条，每条一个徽章加标题", texts(ok).some((text) => text.startsWith("2 条预警")) && DEMO_ALERTS.every((item) => texts(ok).includes(item.title)));
     check("按钮：没开预览是「预览预警样式（10 分钟）」，开着是「结束预览」", texts(ok).includes("预览预警样式（10 分钟）") && texts(alertsOf(null, "caiyun", NOW + 5 * 60_000)).includes("结束预览"));
     check("按钮接的函数：没开预览点了是开始，开着点了是结束", (() => {
       const start = () => undefined;
       const stop = () => undefined;
-      const press = (demoUntil: number) => find(render(AlertsSection({ alertState: null, provider: "caiyun", now: NOW, demoUntil, startDemo: start, stopDemo: stop })), (node) => node.type === "Button")[0].props.action;
+      const press = (demoUntil: number) => find(render(AlertsSection({ alertState: null, provider: "caiyun", now: NOW, demoUntil, startDemo: start, stopDemo: stop, fold: foldOf(true) })), (node) => node.type === "Button")[0].props.action;
       return press(0) === start && press(NOW + 1000) === stop;
     })());
     check("备用来源：状态行写「备用来源没有预警」", texts(alertsOf(null, "openmeteo")).includes("备用来源没有预警"));
@@ -747,25 +840,30 @@ function main(): void {
       return texts(node).includes("接口没有返回预警数据") && find(node, (n) => n.type === "ZStack").length === 0;
     })());
     check("最要紧的两句放在最后：预警仅供参考、没看到不等于没有", (() => {
-      const footer = ok.props.footer;
-      return isNode(footer) && textOf(footer).includes("预警仅供参考，以官方发布为准") && textOf(footer).includes("没看到预警，不等于没有预警");
+      const footer = footnoteOf(ok);
+      return footer.includes("预警仅供参考，以官方发布为准") && footer.includes("没看到预警，不等于没有预警") && footer.endsWith("联网出问题、接口没返回预警数据时也不会显示");
     })());
+    check("标题「天气预警」，后面的摘要：有预警写几条，没有预警但开着预览写「预览中」，别的时候不写", titleOf(ok) === "天气预警" && noteOf(ok) === "2 条" && noteOf(alertsOf(null, "caiyun", NOW + 5 * 60_000)) === "预览中" && noteOf(alertsOf(null, "caiyun")) === null && noteOf(alertsOf({ kind: "ok", items: DEMO_ALERTS.slice(), fetchedAt: NOW, failure: null }, "caiyun", NOW + 5 * 60_000)) === "2 条");
+    check("收起时只有标题（里面的预警、按钮、说明文字都不画）", render(AlertsSection({ alertState: { kind: "ok", items: DEMO_ALERTS.slice(), fetchedAt: NOW, failure: null }, provider: "caiyun", now: NOW, demoUntil: 0, startDemo: () => undefined, stopDemo: () => undefined, fold: foldOf(false) })).children.length === 0);
   }
 
   // ---------------------------------------------------------------- 天气来源一节
   section("App 页：天气来源一节");
   {
-    const base = { source: defaultSource(), loaded, now: NOW, hostText: "", tokenText: "", busy: false, onChoice: () => undefined, setHostText: () => undefined, setTokenText: () => undefined, saveCustom: () => undefined, clearCustom: () => undefined };
+    const base = { source: defaultSource(), loaded, now: NOW, hostText: "", tokenText: "", busy: false, onChoice: () => undefined, setHostText: () => undefined, setTokenText: () => undefined, saveCustom: () => undefined, clearCustom: () => undefined, fold: foldOf(true) };
     const builtin = render(SourceSection({ ...base, choice: "builtin" }));
     check("内置：选择器三项、状态行；没有地址 / token 输入框", find(builtin, (node) => node.type === "Picker").length === 1 && find(builtin, (node) => node.type === "Text" && node.props.tag !== undefined).length === 3 && find(builtin, (node) => node.type === "TextField" || node.type === "SecureField").length === 0);
     const custom = render(SourceSection({ ...base, choice: "custom" }));
     check("自己的：多出服务地址、token 两个输入框和「保存并测试」；服务地址的示范是彩云官方的", find(custom, (node) => node.type === "TextField").length === 1 && find(custom, (node) => node.type === "SecureField").length === 1 && texts(custom).includes("保存并测试") && find(custom, (node) => node.type === "TextField")[0].props.prompt === OFFICIAL_HOST);
     check("选了 Open-Meteo：没有输入框", find(render(SourceSection({ ...base, choice: "openmeteo" })), (node) => node.type === "TextField").length === 0);
     check("填过自己的设置才有「清除自己的设置」", !texts(custom).includes("清除自己的设置") && texts(render(SourceSection({ ...base, choice: "custom", source: { mode: "custom", host: "https://weather.example.com", token: "abc" } }))).includes("清除自己的设置"));
-    check("说明文字（页脚）写了三种来源各是什么，一句一行", (() => {
-      const footer = builtin.props.footer;
-      return isNode(footer) && textOf(footer).includes("内置：") && textOf(footer).includes("自己的：") && textOf(footer).includes("Open-Meteo：备用");
+    check("说明文字（展开后的最后一行）写了三种来源各是什么，一句一行", (() => {
+      const footer = footnoteOf(builtin);
+      return footer.includes("内置：") && footer.includes("自己的：") && footer.includes("Open-Meteo：备用");
     })());
+    check("标题「天气来源」，后面的摘要写现在用的是哪一种：内置 / 自己的 / Open-Meteo", titleOf(builtin) === "天气来源" && noteOf(builtin) === "内置" && noteOf(render(SourceSection({ ...base, source: { mode: "custom", host: "https://weather.example.com", token: "abc" }, choice: "custom" }))) === "自己的" && noteOf(render(SourceSection({ ...base, source: { ...defaultSource(), mode: "openmeteo" }, choice: "openmeteo" }))) === "Open-Meteo");
+    check("选择器停在选的那一项上、摘要写的是已经生效的那一种（选了「自己的」但还没保存时，摘要还是原来的）", noteOf(render(SourceSection({ ...base, choice: "custom" }))) === "内置");
+    check("收起时只有标题（选择器、输入框、说明文字都不画）", render(SourceSection({ ...base, choice: "custom", fold: foldOf(false) })).children.length === 0);
     check("状态行：取到了写几点更新；没取成功写原因", texts(builtin).some((text) => text.endsWith(" 更新")) && texts(render(SourceSection({ ...base, choice: "builtin", loaded: { kind: "noData", source: "live", place: null, failure: describeFailure(new FetchError("token")) } }))).includes("token 无效，或者没开通"));
   }
 
@@ -777,11 +875,10 @@ function main(): void {
     for (const size of Object.keys(SIZES)) {
       for (const content of [c.compact, c.compactAlert, c.compactPlain, c.compactFailed, c.large, c.largeAlert, c.largePlain, NO_DATA, NO_LOCATION]) everything.push(...texts(view(size, content)));
     }
-    const base = { source: defaultSource(), loaded, now: NOW, hostText: "", tokenText: "", busy: false, onChoice: () => undefined, setHostText: () => undefined, setTokenText: () => undefined, saveCustom: () => undefined, clearCustom: () => undefined };
+    const base = { source: defaultSource(), loaded, now: NOW, hostText: "", tokenText: "", busy: false, onChoice: () => undefined, setHostText: () => undefined, setTokenText: () => undefined, saveCustom: () => undefined, clearCustom: () => undefined, fold: foldOf(true) };
     for (const choice of ["builtin", "custom", "openmeteo"] as const) {
       const node = render(SourceSection({ ...base, choice }));
       everything.push(...texts(node));
-      if (isNode(node.props.footer)) everything.push(textOf(node.props.footer));
       walk(node, (n) => {
         if (typeof n.props.prompt === "string") everything.push(n.props.prompt);
       });
